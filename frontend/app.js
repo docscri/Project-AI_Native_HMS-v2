@@ -17,6 +17,26 @@ const ageOf = dob => { if (!dob) return ""; const b = new Date(dob), t = new Dat
 const firstName = n => n.replace(/^Dr\.?\s*/i, "").trim().split(/\s+/)[0] || "User";
 const STATUS = { booked: "Booked", waiting: "Waiting", with_doctor: "In consultation", done: "Done", no_show: "No-show", cancelled: "Cancelled" };
 const pill = st => `<span class="pill s-${st}">${STATUS[st] || st}</span>`;
+const rupees = n => "₹" + Number(n || 0).toLocaleString("en-IN");
+const hoursOf = s => (s.sessions?.length ? s.sessions : [s]).map(x => `${x.start}–${x.end}`).join(" · ");
+const openReceipt = id => window.open(`/api/visits/${id}/receipt?token=${encodeURIComponent(S.token)}`, "_blank");
+const CANCEL_REASONS = ["Patient asked", "Doctor unavailable", "Booked by mistake"];
+const RESCHED_REASONS = ["Patient asked", "Doctor unavailable", "Clinic change"];
+const REFUND_REASONS = ["Charged twice", "Visit not done", "Fee changed"];
+const reasonChips = (list, cur, a) => `<div class="seg reason-seg">${list.map(r => `<button data-a="${a}" data-v="${esc(r)}" aria-pressed="${r === cur}">${r}</button>`).join("")}</div>`;
+function payBlock(fee, pay) {
+  return `<div class="pay-box"><div class="tiles-row"><div class="tk big"><small>Fee</small><b id="pay-due">${rupees(fee)}</b></div></div>
+    <div class="seg" id="pay-seg">${[["cash", "Cash"], ["upi", "UPI"], ["card", "Card"], ["waive", "Waive"]].map(([m, l]) => `<button data-a="pay" data-v="${m}" aria-pressed="${m === pay}">${l}</button>`).join("")}</div>
+    <div class="grid2"><label class="field" id="pay-disc-wrap" ${pay === "waive" ? "hidden" : ""}>Discount (₹)<input type="number" min="0" max="${fee}" id="pay-disc" data-a="pay-disc" data-fee="${fee}" value=""></label>
+      <label class="field" id="pay-why-wrap" ${pay === "waive" ? "" : "hidden"}>Reason<input id="pay-why"></label></div></div>`;
+}
+function readPay(fee) {
+  const pay = M.pay, why = $("#pay-why")?.value.trim() || "";
+  if (pay === "waive") return { payment_method: null, discount: fee, discount_reason: why };
+  return { payment_method: pay, discount: Number($("#pay-disc")?.value) || 0, discount_reason: why };
+}
+const paidDone = (title, v) => `<h2>${title}</h2><div class="result">${esc(v.patient_name)}${v.token_label ? ` · token ${v.token_label}` : ""} · ${rupees(v.amount_paid)}${v.payment_method ? " · " + v.payment_method.toUpperCase() : ""}</div>
+  <div class="foot"><button class="btn" data-a="receipt" data-v="${v.id}">Receipt</button><button class="btn primary" data-a="close-refresh">Done</button></div>`;
 const toMin = t => { const [h, m] = t.split(":").map(Number); return h * 60 + m; };
 function limitsOf(start, end, by, val) {
   const len = Math.max(1, toMin(end) - toMin(start)); val = Math.max(1, Number(val) || 1);
@@ -207,12 +227,16 @@ document.addEventListener("submit", e => {
 });
 
 /* clinic rules form (onboarding + admin) */
+const sessionsOf = v => v.sessions?.length ? v.sessions.map(x => ({ start: x.start, end: x.end })) : [{ start: v.start || "09:00", end: v.end || "13:00" }];
 function limitBlock(p, v) {
-  const l = limitsOf(v.start, v.end, v.limit_by, v.limit_value);
+  const ss = sessionsOf(v), f = ss[0];
+  const l = limitsOf(f.start, f.end, v.limit_by, v.limit_value);
   const patientValue = v.limit_by === "patients" ? v.limit_value : Math.max(1, l.max);
   const minuteValue = v.limit_by === "minutes" ? v.limit_value : Math.max(1, l.per);
   const byP = v.limit_by === "patients";
-  return `<div class="grid2"><label class="field">Start<input type="time" id="${p}-start" value="${v.start}" data-a="lim" data-p="${p}"></label><label class="field">End<input type="time" id="${p}-end" value="${v.end}" data-a="lim" data-p="${p}"></label></div>
+  return `${ss.map((x, i) => `<div class="sess-row"><div class="grid2"><label class="field">${ss.length > 1 ? `Session ${i + 1} start` : "Start"}<input type="time" id="${p}-s${i}" value="${x.start}" data-a="lim" data-p="${p}"></label><label class="field">End<input type="time" id="${p}-e${i}" value="${x.end}" data-a="lim" data-p="${p}"></label></div>
+      ${ss.length > 1 ? `<button class="icon-x" data-a="ses-del" data-p="${p}" data-v="${i}" aria-label="Remove session">×</button>` : ""}</div>`).join("")}
+    ${ss.length < 3 ? `<div><button class="btn small" data-a="ses-add" data-p="${p}">+ Add session</button></div>` : ""}
     <div class="rule-row"><div class="pick-seg">
       <label><input type="radio" name="${p}-by" value="patients" ${byP ? "checked" : ""} data-a="lim" data-p="${p}"><span>By patients</span></label>
       <label><input type="radio" name="${p}-by" value="minutes" ${byP ? "" : "checked"} data-a="lim" data-p="${p}"><span>By time</span></label></div>
@@ -223,13 +247,15 @@ function limitBlock(p, v) {
 function readLimit(p) {
   const by = $(`input[name="${p}-by"]:checked`).value;
   const el = $(`#${p}-${by}-val`);
-  return { start: $(`#${p}-start`).value, end: $(`#${p}-end`).value, limit_by: by, limit_value: Number(el?.value) || 1 };
+  const sessions = [];
+  for (let i = 0; $(`#${p}-s${i}`); i++) sessions.push({ start: $(`#${p}-s${i}`).value, end: $(`#${p}-e${i}`).value });
+  return { sessions, limit_by: by, limit_value: Number(el?.value) || 1 };
 }
 function rulesForm(p, c) {
   const dn = ["S", "M", "T", "W", "T", "F", "S"], full = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
   return `<label class="field">Consultation fee (₹)<input type="number" min="0" id="${p}-fee" value="${c.fee}"></label>
     <div class="rule-group"><span class="rule-label">Working days</span><div class="day-dots">${dn.map((d, i) => `<label title="${full[i]}"><input type="checkbox" id="${p}-d${i}" ${c.days.includes(i) ? "checked" : ""} aria-label="${full[i]}"><span>${d}</span></label>`).join("")}</div></div>
-    <div class="rule-group"><span class="rule-label">Hours</span><div id="${p}-lim" class="rule-stack">${limitBlock(p, c)}</div></div>
+    <div class="rule-group"><span class="rule-label">Sessions</span><div id="${p}-lim" class="rule-stack">${limitBlock(p, c)}</div></div>
     <div class="rule-group"><span class="rule-label">Token</span><div class="pick-seg">
       <label><input type="radio" name="${p}-tok" value="booking" ${c.token_timing === "booking" ? "checked" : ""}><span>At booking</span></label>
       <label><input type="radio" name="${p}-tok" value="arrival" ${c.token_timing === "arrival" ? "checked" : ""}><span>On arrival</span></label></div></div>`;
@@ -240,7 +266,9 @@ const readRules = p => ({ fee: Number($(`#${p}-fee`).value) || 0, days: [0, 1, 2
 /* ---------- operations ---------- */
 async function viewOps() {
   S.date = S.date || TODAY;
+  S.vf = S.vf || { q: "", st: "", doc: "" };
   const load = async () => {
+    if (document.activeElement?.id === "vf-q") return;
     const d = await api(`/operations/day?date=${S.date}`);
     S.data = d;
     const st = d.stats, waiting = d.visits.filter(v => v.status === "waiting"), withDoc = d.visits.filter(v => v.status === "with_doctor");
@@ -253,22 +281,32 @@ async function viewOps() {
         <div class="tile"><span class="label">Done</span><span class="big">${st.done}</span></div>
       </div>
       <div class="actions quick-actions"><button class="btn" data-a="book">New booking</button><button class="btn" data-a="walkin">Walk-in</button>
-        <button class="btn" data-a="register">New patient</button><button class="btn" data-a="schedules">Doctor schedules</button></div>
+        <button class="btn" data-a="register">New patient</button><button class="btn" data-a="schedules">Doctor schedules</button><button class="btn" data-a="collections">Collections</button></div>
       <div class="choices" style="gap:18px">
           <section class="panel"><span class="label">Doctors on ${S.date === TODAY ? "today" : niceDate(S.date)}</span>
             ${d.doctors.length ? `<div class="doctors">${d.doctors.map(doctorCard).join("")}</div>` : `<div class="empty">No doctors on this day</div>`}</section>
           <section class="panel"><span class="label">${S.date === TODAY ? "Today's" : "Day's"} visits</span>
-            <div class="rows">${d.visits.map(v => `<div class="r"><span class="num"><b>${v.expected_time || "—"}</b></span>${S.me.screens.includes("patients") ? `<button class="patient-link who" data-a="pt-open" data-v="${v.patient_id}">${esc(v.patient_name)}</button>` : `<span class="who">${esc(v.patient_name)}</span>`}<span class="muted who doc-col">${esc(v.doctor_name)}</span>${pill(v.status)}</div>`).join("") || `<div class="empty">—</div>`}</div></section>
+            <div class="vf-bar"><input class="input" id="vf-q" placeholder="Search name, phone or UHID" value="${esc(S.vf.q)}" data-a="vf-q" autocomplete="off">
+              ${S.doctors.length > 1 ? `<select class="input" data-a="vf-doc" aria-label="Doctor"><option value="">All doctors</option>${S.doctors.map(x => `<option value="${x.id}" ${String(x.id) === S.vf.doc ? "selected" : ""}>${esc(x.name)}</option>`).join("")}</select>` : ""}</div>
+            <div class="seg vf-seg">${VF.map(([k, l]) => `<button data-a="vf-st" data-v="${k}" aria-pressed="${k === S.vf.st}">${l}</button>`).join("")}</div>
+            <div class="rows" id="ops-rows">${opsRows(d.visits)}</div></section>
       </div>`);
   };
   await run(load);
   if (S.date === TODAY) S.timer = setInterval(() => !M && run(load), 8000);
 }
+const VF = [["", "All"], ["booked", "Booked"], ["waiting", "Waiting"], ["with_doctor", "In consultation"], ["done", "Done"], ["no_show", "No-show"]];
+function opsRows(vs) {
+  const q = S.vf.q.trim().toLowerCase(), digits = q.replace(/\D/g, "");
+  const list = vs.filter(v => (!S.vf.st || v.status === S.vf.st) && (!S.vf.doc || String(v.doctor_id) === S.vf.doc)
+    && (!q || v.patient_name.toLowerCase().includes(q) || (v.uhid || "").toLowerCase().includes(q) || (digits && (v.phone || "").replace(/\D/g, "").includes(digits))));
+  return list.map(v => `<div class="r"><span class="num"><b>${v.token_label || v.expected_time || "—"}</b></span>${S.me.screens.includes("patients") ? `<button class="patient-link who" data-a="pt-open" data-v="${v.patient_id}">${esc(v.patient_name)}</button>` : `<span class="who">${esc(v.patient_name)}</span>`}<span class="muted who doc-col">${esc(v.doctor_name)}${v.session_label ? " · " + v.session_label : ""}</span>${pill(v.status)}</div>`).join("") || `<div class="empty">—</div>`;
+}
 function doctorCard(d) {
   const s = d.schedule;
   return `<button class="dcard" data-a="open-doctor" data-v="${d.id}">
     <div class="line"><span class="actions" style="gap:10px;align-items:center"><span class="letter">${d.letter}</span><h3>${esc(d.name)}</h3></span></div>
-    <div class="muted" style="font-size:14px">${s.start}–${s.end}</div>
+    <div class="muted" style="font-size:14px">${hoursOf(s)}</div>
     <div class="capacity-line"><span>Capacity</span><b class="num">${d.used}/${s.max_patients}</b></div>
     <div class="meter"><i style="width:${Math.min(100, (d.used / s.max_patients) * 100)}%"></i></div>
   </button>`;
@@ -282,28 +320,36 @@ async function viewQueue(doctorId) {
     const cols = [["booked", "Booked"], ["waiting", "Waiting"], ["with_doctor", "With doctor"], ["done", "Done"]];
     const s = q.schedule;
     view(`<div class="head"><div><a href="#/ops" class="back-link">${arrowLeft}<span>Back</span></a><h1>${esc(q.doctor.name)}</h1>
-        <p>${s ? `${s.start}–${s.end} · ${s.limit_by === "minutes" ? s.minutes_per_patient + " min per patient" : "up to " + s.max_patients + " patients"}` : "Off"}</p></div><span class="grow"></span>
+        <p>${s ? `${hoursOf(s)} · ${s.limit_by === "minutes" ? s.minutes_per_patient + " min per patient" : "up to " + s.max_patients + " patients"}` : "Off"}</p></div><span class="grow"></span>
         <input class="top-date" type="date" data-a="ops-date" value="${S.date}" aria-label="Choose queue date"></div>
       <div class="actions quick-actions"><button class="btn" data-a="book" data-v="${doctorId}">New booking</button><button class="btn" data-a="walkin" data-v="${doctorId}">Walk-in</button>
-        ${s && q.columns.booked.length ? `<button class="btn" data-a="end-session" data-v="${doctorId}">End session</button>` : ""}</div>
+        ${s ? s.sessions.filter(x => q.columns.booked.some(v => v.session_start === x.key)).map(x => `<button class="btn" data-a="end-session" data-v="${doctorId}" data-s="${x.key}">End ${s.sessions.length > 1 ? x.label.toLowerCase() + " " : ""}session</button>`).join("") : ""}</div>
       <div class="board">${cols.map(([k, l]) => `<section class="col"><header>${pill(k).replace(STATUS[k], l)}<span class="muted num">${q.columns[k].length}</span></header>
-        ${q.columns[k].map(qCard).join("") || ""}</section>`).join("")}</div>
+        ${q.columns[k].map((v, i, l) => qCard(v, i, l)).join("")}</section>`).join("")}</div>
       ${q.not_seen.length ? `<section class="panel"><span class="label">Not seen</span><div class="rows">${q.not_seen.map(v => `<div class="r q" style="grid-template-columns:minmax(0,1fr) auto"><span>${esc(v.patient_name)}</span>${pill(v.status)}</div>`).join("")}</div></section>` : ""}`);
   };
   await run(load);
   if (S.date === TODAY) S.timer = setInterval(() => !M && run(load), 8000);
 }
-function qCard(v) {
+function qCard(v, i, list) {
   const tok = v.token_label ? `<span class="tok chip">${v.token_label}</span>` : `<span class="tok none">No token yet</span>`;
   const clip = `<button class="btn small" data-a="upload" data-v="${v.id}" aria-label="Add document">📎${v.doc_count ? " " + v.doc_count : ""}</button>`;
-  let meta = "", acts = "";
+  const sess = v.session_label ? `<span class="pill s-soft">${v.session_label}</span>` : "";
+  const paid = v.paid_at ? `<span class="pill s-paid">${v.amount_paid ? `${rupees(v.amount_paid)} · ${(v.payment_method || "").toUpperCase()}` : "Waived"}</span>` : "";
+  const refunded = v.refund_amount && v.paid_at ? `<span class="pill s-no_show">Refunded ${rupees(v.refund_amount)}</span>` : "";
+  const more = v.paid_at || (v.status === "waiting" && !v.is_walk_in) ? `<button class="btn small icon-btn" data-a="v-more" data-v="${v.id}" aria-label="More">⋯</button>` : "";
+  let meta = sess, acts = "";
   if (v.status === "booked") {
-    meta = v.expected_time ? `${S.clinic.limit_by === "minutes" ? "" : "~"}${v.expected_time}` : "";
-    acts = `<button class="btn small dark" data-a="arrive" data-v="${v.id}">Arrived</button><button class="btn small" data-a="resched" data-v="${v.id}">Reschedule</button><button class="btn small ghost" data-a="cancel" data-v="${v.id}">Cancel</button>${clip}`;
+    meta += (v.expected_time ? `<span>${S.clinic.limit_by === "minutes" ? "" : "~"}${v.expected_time}</span>` : "") + (v.late ? `<span class="pill s-waiting">Late</span>` : "");
+    acts = `<button class="btn small dark" data-a="arrive" data-v="${v.id}">Arrived</button><button class="btn small" data-a="late" data-v="${v.id}" aria-pressed="${v.late}">Late</button><button class="btn small" data-a="resched" data-v="${v.id}">Reschedule</button><button class="btn small ghost" data-a="cancel" data-v="${v.id}">Cancel</button>${clip}`;
   } else if (v.status === "waiting") {
-    meta = `<span class="pill s-paid">Paid ₹${v.fee} · ${(v.payment_method || "").toUpperCase()}</span>${v.is_walk_in ? `<span class="pill s-soft">Walk-in</span>` : ""}<span>since ${(v.arrived_at || "").slice(11, 16)}</span>`;
-    acts = clip;
-  } else meta = "";
+    const same = list.filter(x => x.session_start === v.session_start), k = same.indexOf(v);
+    meta += `${paid}${refunded}${v.is_walk_in ? `<span class="pill s-soft">Walk-in</span>` : ""}<span>since ${(v.arrived_at || "").slice(11, 16)}</span>`;
+    acts = `<button class="btn small icon-btn" data-a="q-move" data-v="${v.id}" data-d="up" aria-label="Move up" ${k === 0 ? "disabled" : ""}>↑</button><button class="btn small icon-btn" data-a="q-move" data-v="${v.id}" data-d="down" aria-label="Move down" ${k === same.length - 1 ? "disabled" : ""}>↓</button>${clip}${more}`;
+  } else {
+    meta += paid + refunded;
+    acts = more;
+  }
   return `<article class="card"><div class="top"><b>${esc(v.patient_name)}</b>${tok}</div><div class="meta"><span class="mono">${esc(v.uhid)}</span>${meta}</div>${acts ? `<div class="acts">${acts}</div>` : ""}</article>`;
 }
 const refresh = () => route();
@@ -312,13 +358,14 @@ const refresh = () => route();
 let M = null;
 function openBooking(mode, opts = {}) {
   M = { kind: "booking", mode, patient: opts.patient || null, q: "", results: [], doctorId: opts.doctorId || S.doctors[0]?.id, date: mode === "walk" ? TODAY : (S.date && S.date >= TODAY ? S.date : TODAY),
-        avail: null, token: null, pay: "upi", visit: opts.visit || null, done: null };
+        avail: null, token: null, pay: "upi", session: opts.visit?.session_start || null, reason: "", visit: opts.visit || null, done: null };
   if (!S.doctors.length) return toast("Add a doctor first (Administration → Members).", true);
   loadAvail();
 }
 async function loadAvail() {
   const b = M; if (!b || b.kind !== "booking") return;
-  b.avail = await api(`/availability?doctor_id=${b.doctorId}&date=${b.mode === "walk" ? TODAY : b.date}${b.visit ? "&exclude_visit=" + b.visit.id : ""}`).catch(e => ({ available: false, reason: e.message }));
+  b.avail = await api(`/availability?doctor_id=${b.doctorId}&date=${b.mode === "walk" ? TODAY : b.date}${b.visit ? "&exclude_visit=" + b.visit.id : ""}${b.session ? "&session=" + b.session : ""}`).catch(e => ({ available: false, reason: e.message, sessions: [] }));
+  b.session = b.avail.session || null;
   b.token = b.avail.next?.token ?? null;
   renderBooking();
 }
@@ -340,6 +387,8 @@ function renderBooking() {
     slot = `${slotCard(b.token, times[b.token], s.exact_time ? "" : "approx.", a)}<div class="chips slot-chips">${Array.from({ length: s.max_patients }, (_, i) => i + 1).filter(t => free.has(t)).map(t => `<button data-a="pick-token" data-v="${t}" aria-pressed="${t === b.token}"><b>${t}</b>${times[t]}</button>`).join("")}</div>`;
   } else slot = slotCard("—", a.expected_time, "approx.", a);
   const p = b.patient;
+  const sessChips = (a.sessions || []).length > 1 ? `<div class="seg">${a.sessions.map(x => `<button data-a="bk-session" data-v="${x.key}" aria-pressed="${x.key === b.session}" ${x.ended ? "disabled" : ""}>${x.label} · ${x.start}–${x.end}</button>`).join("")}</div>` : "";
+  const extra = b.mode === "walk" && a.available ? payBlock(a.fee, b.pay) : b.mode === "resched" ? reasonChips(RESCHED_REASONS, b.reason, "bk-reason") : "";
   modal(`<div class="booking-dialog"><h2>${title}</h2>
     <div class="field">Patient</div>
     ${p ? `<div class="hit actions" style="justify-content:space-between;align-items:center"><span><b>${esc(p.name)}</b> <span class="mono muted">${esc(p.uhid)}</span> · ${esc(p.phone)}</span>${b.mode === "resched" ? "" : `<button class="btn small" data-a="bk-clear">Change</button>`}</div>`
@@ -349,7 +398,9 @@ function renderBooking() {
       ${b.mode === "walk" ? "" : `<label class="field">Date<input type="date" id="bk-date" min="${TODAY}" value="${b.date}" data-a="bk-date"></label>`}
       <label class="field">Doctor<select id="bk-doc" data-a="bk-doc">${S.doctors.map(d => `<option value="${d.id}" ${d.id === b.doctorId ? "selected" : ""}>${esc(d.name)}</option>`).join("")}</select></label>
     </div>
+    ${sessChips}
     ${slot}
+    ${extra}
     <div class="foot"><button class="btn" data-a="close">Close</button>
       <button class="btn primary" data-a="bk-confirm" ${p && a.available ? "" : "disabled"}>${b.mode === "walk" ? "Paid" : b.mode === "resched" ? "Move booking" : "Confirm booking"}</button></div></div>`);
   const q = $("#bk-q"); if (q) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); }
@@ -357,13 +408,13 @@ function renderBooking() {
 async function confirmBooking() {
   const b = M, p = b.patient;
   if (b.mode === "walk") {
-    const v = await api("/visits/walk-in", { body: { patient_id: p.id, doctor_id: b.doctorId, payment_method: b.pay } });
-    b.done = `<h2>Walk-in added</h2><div class="result">${esc(p.name)} · ${v.token_label}</div><div class="foot"><button class="btn primary" data-a="close-refresh">Done</button></div>`;
+    const v = await api("/visits/walk-in", { body: { patient_id: p.id, doctor_id: b.doctorId, session: b.session, ...readPay(b.avail.fee) } });
+    b.done = paidDone("Walk-in added", v);
   } else if (b.mode === "resched") {
-    const v = await api(`/visits/${b.visit.id}/reschedule`, { body: { doctor_id: b.doctorId, date: b.date, token: b.token } });
+    const v = await api(`/visits/${b.visit.id}/reschedule`, { body: { doctor_id: b.doctorId, date: b.date, session: b.session, token: b.token, reason: b.reason } });
     b.done = `<h2>Booking moved</h2><div class="result">${esc(p.name)} → ${esc(v.doctor_name)}, ${niceDate(v.date)}${v.token_label ? ` · token ${v.token_label} · ${v.expected_time}` : ""}</div><div class="foot"><button class="btn primary" data-a="close-refresh">Done</button></div>`;
   } else {
-    const v = await api("/visits", { body: { patient_id: p.id, doctor_id: b.doctorId, date: b.date, token: b.token } });
+    const v = await api("/visits", { body: { patient_id: p.id, doctor_id: b.doctorId, date: b.date, session: b.session, token: b.token } });
     b.done = `<h2>Booked</h2><div class="result">${esc(p.name)} with ${esc(v.doctor_name)} · ${niceDate(v.date)}</div><div class="say">“${esc(v.tell_patient)}”</div>
       <div class="foot"><button class="btn" data-a="close-refresh">Done</button><button class="btn primary" data-a="book-another">Book another</button></div>`;
   }
@@ -378,10 +429,29 @@ function searchPatients(q) {
 /* arrival, cancel, upload, register */
 function openArrive(v) {
   M = { kind: "arrive", pay: "upi", v };
-  modal(`<h2>${esc(v.patient_name)} has arrived</h2>
-    <div class="hit"><div class="label">Collect fee</div><div class="say">₹${v.fee}</div></div>
-    <div class="seg" id="pay-seg">${["cash", "upi", "card"].map(m => `<button data-a="pay" data-v="${m}" aria-pressed="${m === "upi"}">${m.toUpperCase()}</button>`).join("")}</div>
-    <div class="foot"><button class="btn" data-a="close">Not now</button><button class="btn primary" data-a="arrive-paid">Paid · send to Waiting</button></div>`);
+  modal(`<h2>${esc(v.patient_name)} has arrived</h2>${payBlock(v.fee, "upi")}
+    <div class="foot"><button class="btn" data-a="close">Back</button><button class="btn primary" data-a="arrive-paid">Send to Waiting</button></div>`);
+}
+function openRefund(v) {
+  const left = (v.amount_paid || 0) - (v.refund_amount || 0);
+  M = { kind: "refund", v, reason: "" };
+  modal(`<h2>Refund · ${esc(v.patient_name)}</h2>
+    <label class="field">Amount (₹)<input type="number" min="1" max="${left}" id="rf-amt" value="${left}"></label>
+    ${reasonChips(REFUND_REASONS, "", "rf-reason")}
+    <label class="field">Reason<input id="rf-why"></label>
+    <div class="foot"><button class="btn" data-a="close">Back</button><button class="btn danger" data-a="refund-go">Refund</button></div>`);
+}
+async function openCollections() {
+  M = { kind: "collections" };
+  const d = await api(`/billing/day?date=${S.date}`), m = d.by_method;
+  const line = (v, amt, extra) => `<div class="r q coll-row"><span class="num muted">${v.receipt_no ? "#" + v.receipt_no : ""}</span><span class="who">${esc(v.patient_name)}</span><span class="muted">${extra}</span><b class="num">${amt}</b><button class="btn small" data-a="receipt" data-v="${v.id}">Receipt</button></div>`;
+  modal(`<h2>Collections · ${S.date === TODAY ? "Today" : niceDate(S.date)}</h2>
+    <div class="tiles-row"><div class="tk big"><small>Net</small><b>${rupees(d.net)}</b></div><div class="tk"><small>Cash</small><b>${rupees(m.cash)}</b></div><div class="tk"><small>UPI</small><b>${rupees(m.upi)}</b></div><div class="tk"><small>Card</small><b>${rupees(m.card)}</b></div></div>
+    <div class="tiles-row"><div class="tk"><small>Refunds</small><b>${rupees(d.refunded)}</b></div><div class="tk"><small>Discounts</small><b>${rupees(d.discounts)}</b></div><div class="tk"><small>Waived</small><b>${d.waived}</b></div></div>
+    <div class="rows coll-list">${d.payments.map(v => line(v, rupees(v.amount_paid), v.amount_paid ? (v.payment_method || "").toUpperCase() : "Waived")).join("")}
+      ${d.refunds.map(v => line(v, "−" + rupees(v.refund_amount), "Refund · " + esc(v.refund_reason || ""))).join("")}
+      ${d.payments.length || d.refunds.length ? "" : `<div class="empty">—</div>`}</div>
+    <div class="foot"><button class="btn" data-a="close">Close</button></div>`, true);
 }
 function openUpload(visitId) {
   M = { kind: "upload", visitId };
@@ -416,7 +486,7 @@ function renderSched() {
   const sel = s.days.find(d => d.date === s.sel);
   let editor = "";
   if (sel) {
-    const base = sel.schedule || { start: S.clinic.start, end: S.clinic.end, limit_by: S.clinic.limit_by, limit_value: S.clinic.limit_value };
+    const base = sel.edit || sel.schedule || { sessions: S.clinic.sessions, limit_by: S.clinic.limit_by, limit_value: S.clinic.limit_value };
     editor = `<div class="hit choices"><div class="actions" style="justify-content:space-between;align-items:center"><h3>${niceDate(sel.date)}</h3>${sel.override ? `<span class="pill s-with_doctor">Changed</span>` : `<span class="pill s-soft">Clinic hours</span>`}</div>
       <div class="seg"><button data-a="sc-off" data-v="0" aria-pressed="${!sel.off}">Working</button><button data-a="sc-off" data-v="1" aria-pressed="${sel.off}">Off</button></div>
       <div id="so-lim" class="choices" ${sel.off ? 'style="opacity:.35;pointer-events:none"' : ""}>${limitBlock("so", base)}</div>
@@ -427,8 +497,15 @@ function renderSched() {
     <div class="actions month-picker-wrap"><div class="month-picker"><span>Month</span><select data-a="sc-month-picker" aria-label="Choose schedule month">${Array.from({ length: 12 }, (_, i) => `<option value="${i + 1}" ${i + 1 === m ? "selected" : ""}>${new Date(2000, i, 1).toLocaleDateString("en-IN", { month: "long" })}</option>`).join("")}</select><select data-a="sc-year-picker" aria-label="Choose schedule year">${scheduleYears.map(n => `<option value="${n}" ${n === y ? "selected" : ""}>${n}</option>`).join("")}</select></div></div>
     <div class="cal">${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(d => `<span class="dow">${d}</span>`).join("")}${"<span></span>".repeat(lead)}
       ${s.days.map(d => `<button class="${d.off ? "off" : ""} ${d.override ? "ovr" : ""}" data-a="sc-day" data-v="${d.date}" aria-pressed="${d.date === s.sel}" ${d.date < TODAY ? "disabled" : ""}><b>${Number(d.date.slice(8))}</b>${d.off ? "Off" : `${d.schedule.start}–${d.schedule.end}`}</button>`).join("")}</div>
-    ${editor}
-    <div class="foot"><button class="btn" data-a="close-refresh">Close</button></div>`, true);
+    ${s.leave ? leaveEditor() : editor}
+    <div class="foot">${s.leave ? "" : `<button class="btn" data-a="lv-open">Leave</button>`}<button class="btn" data-a="close-refresh">Close</button></div>`, true);
+}
+function leaveEditor() {
+  const l = M.leave;
+  return `<div class="hit choices"><h3>Leave</h3>
+    ${S.me.is_admin ? `<div class="seg"><button data-a="lv-who" data-v="doc" aria-pressed="${!l.all}">${esc(S.doctors.find(d => d.id === M.doctorId)?.name || "Doctor")}</button><button data-a="lv-who" data-v="all" aria-pressed="${l.all}">Clinic holiday</button></div>` : ""}
+    <div class="grid2"><label class="field">From<input type="date" id="lv-from" min="${TODAY}" value="${l.from}"></label><label class="field">To<input type="date" id="lv-to" min="${TODAY}" value="${l.to}"></label></div>
+    <div class="foot"><button class="btn" data-a="lv-back">Back</button><button class="btn" data-a="lv-save" data-v="0">Working</button><button class="btn primary" data-a="lv-save" data-v="1">Off</button></div></div>`;
 }
 
 /* members */
@@ -719,7 +796,7 @@ document.addEventListener("click", e => {
   const t = e.target.closest("[data-a]"); if (!t) return;
   const a = t.dataset.a, v = t.dataset.v;
   if (a === "scrim") { if (e.target === t && M?.kind !== "sched") closeModal(); return; }
-  if (["lim", "bk-q", "pt-q", "cs-q", "bk-date", "bk-doc", "sc-doc", "sc-month-picker", "sc-year-picker", "cs-doc"].includes(a)) return;
+  if (["lim", "vf-q", "vf-doc", "pay-disc", "bk-q", "pt-q", "cs-q", "bk-date", "bk-doc", "sc-doc", "sc-month-picker", "sc-year-picker", "cs-doc"].includes(a)) return;
   e.preventDefault();
   const D = S.data;
   run(async () => {
@@ -756,12 +833,40 @@ document.addEventListener("click", e => {
         if (M.back) { const back = M.back; M = back; M.patient = p; renderBooking(); } else { closeModal(); location.hash.startsWith("#/consult") ? go(`#/consult?doctor=${S.data.doctorId}&patient=${p.id}`) : go(`#/patients/${p.id}`); }
         break; }
       case "arrive": openArrive([...D.columns.booked].find(x => x.id === Number(v))); break;
-      case "pay": M.pay = v; document.querySelectorAll("#pay-seg button").forEach(b => b.setAttribute("aria-pressed", b.dataset.v === v)); break;
-      case "arrive-paid": { const r = await api(`/visits/${M.v.id}/arrive`, { body: { payment_method: M.pay } }); closeModal(); toast(`${r.patient_name} · token ${r.token_label} · waiting`); refresh(); break; }
-      case "cancel": { const vis = D.columns.booked.find(x => x.id === Number(v)); M = { kind: "cancel" };
-        modal(`<h2>Cancel booking?</h2><p style="margin:0">${esc(vis.patient_name)} will be removed from the list. Their token becomes free again.</p><div class="foot"><button class="btn" data-a="close">Keep booking</button><button class="btn danger" data-a="cancel-go" data-v="${v}">Cancel booking</button></div>`); break; }
-      case "cancel-go": await api(`/visits/${v}/cancel`, { body: {} }); closeModal(); toast("Booking cancelled"); refresh(); break;
-      case "end-session": { const r = await api(`/operations/end-session?doctor_id=${v}&date=${S.date}`, { body: {} }); toast(`${r.no_shows} marked as no-show`); refresh(); break; }
+      case "pay": M.pay = v; document.querySelectorAll("#pay-seg button").forEach(b => b.setAttribute("aria-pressed", b.dataset.v === v)); payShow(); break;
+      case "arrive-paid": { const r = await api(`/visits/${M.v.id}/arrive`, { body: readPay(M.v.fee) }); M = { kind: "done" }; modal(paidDone("Sent to Waiting", r)); break; }
+      case "receipt": openReceipt(v); break;
+      case "v-more": { const vis = Object.values(D.columns).flat().find(x => x.id === Number(v)); M = { kind: "more" };
+        modal(`<h2>${esc(vis.patient_name)}</h2><div class="more-list">${vis.paid_at ? `<button class="btn" data-a="receipt" data-v="${v}">Receipt</button>` : ""}
+          ${(vis.amount_paid || 0) > (vis.refund_amount || 0) ? `<button class="btn" data-a="refund" data-v="${v}">Refund</button>` : ""}
+          ${vis.status === "waiting" && !vis.is_walk_in ? `<button class="btn" data-a="undo-arrival" data-v="${v}">Undo arrival</button>` : ""}</div>
+          <div class="foot"><button class="btn" data-a="close">Back</button></div>`); break; }
+      case "collections": await openCollections(); break;
+      case "refund": openRefund(Object.values(D.columns).flat().find(x => x.id === Number(v))); break;
+      case "rf-reason": $("#rf-why").value = v; document.querySelectorAll('[data-a="rf-reason"]').forEach(b => b.setAttribute("aria-pressed", b.dataset.v === v)); break;
+      case "refund-go": { const r = await api(`/visits/${M.v.id}/refund`, { body: { amount: Number($("#rf-amt").value) || null, reason: $("#rf-why").value } }); closeModal(); toast(`Refunded ${rupees(r.refund_amount)}`); refresh(); break; }
+      case "q-move": await api(`/visits/${v}/queue?direction=${t.dataset.d}`, { body: {} }); refresh(); break;
+      case "late": await api(`/visits/${v}/late`, { body: {} }); refresh(); break;
+      case "undo-arrival": { closeModal(); const r = await api(`/visits/${v}/undo-arrival`, { body: {} }); toast(`${r.patient_name} back to Booked${r.refund_amount ? " · refund " + rupees(r.refund_amount) : ""}`); refresh(); break; }
+      case "bk-session": M.session = v; M.token = null; await loadAvail(); break;
+      case "bk-reason": M.reason = v; renderBooking(); break;
+      case "vf-st": S.vf.st = v; route(); break;
+      case "cancel": { const vis = D.columns.booked.find(x => x.id === Number(v)); M = { kind: "cancel", id: v, reason: "" };
+        modal(`<h2>Cancel booking · ${esc(vis.patient_name)}</h2>${reasonChips(CANCEL_REASONS, "", "cn-reason")}<div class="foot"><button class="btn" data-a="close">Back</button><button class="btn danger" data-a="cancel-go" data-v="${v}">Cancel booking</button></div>`); break; }
+      case "cn-reason": M.reason = v; document.querySelectorAll('[data-a="cn-reason"]').forEach(b => b.setAttribute("aria-pressed", b.dataset.v === v)); break;
+      case "cancel-go": await api(`/visits/${v}/cancel`, { body: { reason: M.reason || "" } }); closeModal(); toast("Booking cancelled"); refresh(); break;
+      case "end-session": { const r = await api(`/operations/end-session?doctor_id=${v}&date=${S.date}&session=${t.dataset.s || ""}`, { body: {} }); toast(`${r.no_shows} marked as no-show`); refresh(); break; }
+      case "ses-add": case "ses-del": { const pp = t.dataset.p, vals = readLimit(pp);
+        if (a === "ses-add") { const last = vals.sessions[vals.sessions.length - 1]; const hm = m => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`, st = Math.min(toMin(last.end) + 60, 22 * 60); vals.sessions.push({ start: hm(st), end: hm(Math.min(st + 180, 23 * 60 + 59)) }); }
+        else vals.sessions.splice(Number(v), 1);
+        $(`#${pp}-lim`).innerHTML = limitBlock(pp, vals); break; }
+      case "lv-open": M.leave = { from: M.sel && M.sel >= TODAY ? M.sel : TODAY, to: M.sel && M.sel >= TODAY ? M.sel : TODAY, all: false }; renderSched(); break;
+      case "lv-who": M.leave.from = $("#lv-from").value; M.leave.to = $("#lv-to").value; M.leave.all = v === "all"; renderSched(); break;
+      case "lv-back": M.leave = null; renderSched(); break;
+      case "lv-save": { const l = M.leave, from = $("#lv-from").value, to = $("#lv-to").value || from;
+        const r = await api("/schedules/leave", { body: { start_date: from, end_date: to, doctor_id: l.all ? null : M.doctorId, off: v === "1" } });
+        toast(`${r.days} day${r.days > 1 ? "s" : ""} ${v === "1" ? "off" : "working"}${r.bookings_affected ? ` · ${r.bookings_affected} booking${r.bookings_affected > 1 ? "s" : ""} to move` : ""}`, r.bookings_affected > 0);
+        M.leave = null; await loadMonth(); break; }
       case "upload": openUpload(Number(v)); break;
       case "upload-go": { const f = $("#up-file").files[0]; if (!f) return toast("Choose a file first", true); await doUpload(M.visitId, f); closeModal(); location.hash.startsWith("#/consult") ? refreshConsult() : refresh(); break; }
       case "schedules": await openSchedules(D?.doctor?.id); break;
@@ -814,16 +919,26 @@ document.addEventListener("click", e => {
     }
   });
 });
+function payShow() {
+  const w = M?.pay === "waive", disc = Number($("#pay-disc")?.value) || 0, fee = Number($("#pay-disc")?.dataset.fee) || 0;
+  const dw = $("#pay-disc-wrap"), rw = $("#pay-why-wrap"), due = $("#pay-due");
+  if (dw) dw.hidden = w;
+  if (rw) rw.hidden = !(w || disc > 0);
+  if (due) due.textContent = rupees(w ? 0 : Math.max(0, fee - disc));
+}
 function rerenderNote() { const c = $("#cx-center"); if (c) c.innerHTML = center(); }
 document.addEventListener("input", e => {
   const a = e.target.dataset?.a;
   if (a === "bk-q") searchPatients(e.target.value);
+  if (a === "pay-disc") payShow();
+  if (a === "vf-q") { S.vf.q = e.target.value; const r = $("#ops-rows"); if (r && S.data?.visits) r.innerHTML = opsRows(S.data.visits); }
   if (a === "cs-q") { S.cq = e.target.value; clearTimeout(S.cqt); S.cqt = setTimeout(async () => { await run(S.reloadConsult); const q = $("#cs-q"); if (q) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); } }, 220); }
   if (a === "pt-q") { S.pq = e.target.value; clearTimeout(S.pqt); S.pqt = setTimeout(async () => { await viewPatients(Number(location.hash.split("/")[2]) || null); const q = $("#pt-q"); q.focus(); q.setSelectionRange(q.value.length, q.value.length); }, 200); }
 });
 document.addEventListener("change", e => {
   const a = e.target.dataset?.a;
   if (a === "ops-date") { S.date = e.target.value || TODAY; route(); }
+  if (a === "vf-doc") { S.vf.doc = e.target.value; const r = $("#ops-rows"); if (r && S.data?.visits) r.innerHTML = opsRows(S.data.visits); }
   if (a === "bk-date") { M.date = e.target.value || TODAY; run(loadAvail); }
   if (a === "bk-doc") { M.doctorId = Number(e.target.value); run(loadAvail); }
   if (a === "sc-doc") { M.doctorId = Number(e.target.value); M.sel = null; run(loadMonth); }
