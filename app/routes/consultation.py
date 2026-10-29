@@ -2,7 +2,7 @@
 import html
 import json
 import mimetypes
-from datetime import date as Date
+from datetime import date as Date, datetime
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, Response
@@ -312,8 +312,8 @@ def sign(note_id: int, me=Depends(doctor_screen), db=Depends(get_db)):
 
 
 @router.get("/notes/{note_id}/print", response_class=HTMLResponse)
-def print_note(note_id: int, token: str, db=Depends(get_db)):
-    """Printable page (browser Print → Save as PDF). Token in the query so it opens in a new tab."""
+def print_note(note_id: int, token: str, auto: int = 0, db=Depends(get_db)):
+    """Printable A4 page in the app's look (browser Print → Save as PDF). Token in the query so it opens in a new tab."""
     me = member_for_token(db, token)
     n = row(db.execute("select * from notes where id = ?", (note_id,)).fetchone())
     if not me or not n or n["clinic_id"] != me["clinic_id"]:
@@ -323,16 +323,54 @@ def print_note(note_id: int, token: str, db=Depends(get_db)):
     p = row(db.execute("select * from patients where id = ?", (n["patient_id"],)).fetchone())
     d = row(db.execute("select name, speciality from members where id = ?", (n["doctor_id"],)).fetchone())
     content, e = json.loads(n["content"]), html.escape
-    soap = "".join(f"<p><b>{k}</b> {e(t)}</p>" for k, t in content["soap"].items() if t)
-    rx = "".join(f"<tr><td>{e(r.get('medicine', ''))}</td><td>{e(r.get('dose', ''))}</td><td>{e(r.get('duration', ''))}</td><td>{e(r.get('instructions', ''))}</td></tr>"
-                 for r in content["rx"])
-    return f"""<!doctype html><meta charset="utf-8"><title>{e(p['name'])} · {v['date']}</title>
-<style>body{{font-family:system-ui,sans-serif;max-width:720px;margin:32px auto;padding:0 16px;color:#111}}
-h1{{font-size:20px;margin:0}}table{{width:100%;border-collapse:collapse}}td,th{{border-bottom:1px solid #ccc;padding:6px;text-align:left}}
-.muted{{color:#555}}hr{{border:0;border-top:1px solid #ccc;margin:16px 0}}@media print{{button{{display:none}}}}</style>
-<button onclick="print()">Print / Save as PDF</button>
-<h1>{e(c['name'])}</h1><div class="muted">{e(c['address'])} · {e(c['phone'])}</div><hr>
-<b>{e(p['name'])}</b> · {age(p['dob']) or ''} {e(p['sex'] or '')} · {e(p['uhid'])}<br>
-<span class="muted">{v['date']} · {e(d['name'])}{' · ' + e(d['speciality']) if d['speciality'] else ''}</span><hr>
-{soap}<h3>Prescription</h3><table><tr><th>Medicine</th><th>Dose</th><th>Duration</th><th>Instructions</th></tr>{rx}</table>
-<hr><div class="muted">{'Signed ' + n['signed_at'] if n['signed_at'] else 'Draft — not signed'} · {e(d['name'])}</div>"""
+    labels = {"S": "Subjective", "O": "Objective", "A": "Assessment", "P": "Plan"}
+    soap = "".join(f'<div class="sec"><b class="tile">{k}</b><div><small>{labels[k]}</small><p>{e(t)}</p></div></div>'
+                   for k, t in content["soap"].items() if t and k in labels)
+    rx = [r for r in content["rx"] if r.get("medicine")]
+    rx_html = ("<h2>Prescription</h2><table><tr><th>Medicine</th><th>Dose</th><th>Duration</th><th>Instructions</th></tr>" + "".join(
+        f"<tr><td><b>{e(r.get('medicine', ''))}</b></td><td>{e(r.get('dose', ''))}</td><td>{e(r.get('duration', ''))}</td><td>{e(r.get('instructions', ''))}</td></tr>"
+        for r in rx) + "</table>") if rx else ""
+    def when(ts):
+        dt = datetime.fromisoformat(ts)
+        return f"{dt.day} {dt.strftime('%b %Y')}, {dt.hour % 12 or 12}:{dt.minute:02d} {'am' if dt.hour < 12 else 'pm'}"
+    vd = Date.fromisoformat(v["date"])
+    visit_day = f"{vd.day} {vd.strftime('%b %Y')}"  # portable: no %-d
+    sex = {"M": "Male", "F": "Female", "O": "Other"}.get(p["sex"] or "", "")
+    who = " · ".join(x for x in [f"{age(p['dob'])} yrs" if p["dob"] else "", sex, p["uhid"]] if x)
+    signed = f"Signed by {e(d['name'])} · {when(n['signed_at'])}" if n["signed_at"] else "Draft · not signed"
+    return f"""<!doctype html><meta charset="utf-8"><title>{e(p['name'])} · {visit_day}</title>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+<style>
+@page {{ size: A4; margin: 16mm 14mm; }}
+* {{ box-sizing: border-box; }}
+body {{ font-family: Manrope, system-ui, sans-serif; color: #0B1411; margin: 0; background: #E8F1EC; -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
+.page {{ max-width: 780px; margin: 28px auto; background: #F6FAF7; border-radius: 28px; padding: 40px 44px; }}
+header {{ display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; background: #0B1411; color: #E8F1EC; border-radius: 22px; padding: 22px 26px; }}
+header h1 {{ margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -.01em; }}
+header .lime {{ color: #B6F36B; }}
+header small, header .r small {{ color: #9FB1A9; font-size: 12.5px; font-weight: 600; display: block; margin-top: 4px; }}
+header .r {{ text-align: right; }}
+header .r b {{ font-size: 16px; }}
+.secs {{ display: flex; flex-direction: column; gap: 20px; margin: 30px 0 8px; }}
+.sec {{ display: grid; grid-template-columns: 38px 1fr; gap: 16px; align-items: start; }}
+.tile {{ width: 38px; height: 38px; border-radius: 11px; background: #0B1411; color: #E8F1EC; display: grid; place-items: center; font-size: 16px; font-weight: 800; }}
+.sec small {{ display: block; font-size: 10.5px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: #6B7C75; margin-top: 2px; }}
+.sec p {{ margin: 4px 0 0; font-size: 15.5px; line-height: 1.65; font-weight: 500; }}
+h2 {{ font-size: 11px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: #6B7C75; margin: 30px 0 10px; }}
+table {{ width: 100%; border-collapse: separate; border-spacing: 0; font-size: 14.5px; }}
+th {{ text-align: left; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: #6B7C75; padding: 0 14px 8px; }}
+td {{ padding: 12px 14px; }}
+tr:nth-child(even) td {{ background: #E8F1EC; }}
+tr:nth-child(even) td:first-child {{ border-radius: 12px 0 0 12px; }} tr:nth-child(even) td:last-child {{ border-radius: 0 12px 12px 0; }}
+footer {{ display: flex; justify-content: space-between; align-items: flex-end; margin-top: 44px; gap: 24px; }}
+footer .s {{ color: #6B7C75; font-size: 13px; font-weight: 600; }}
+footer .sign {{ width: 210px; text-align: center; font-size: 12px; color: #6B7C75; font-weight: 600; padding-top: 44px; background: linear-gradient(#0B1411, #0B1411) bottom 22px center / 100% 1.5px no-repeat; }}
+@media print {{ body {{ background: #fff; }} .page {{ margin: 0; padding: 0; background: #fff; border-radius: 0; max-width: none; }} }}
+</style>
+<div class="page">
+<header><div><h1>{e(c['name'])}</h1><small>{e(' · '.join(x for x in [c['address'], c['phone']] if x))}</small></div>
+<div class="r"><b>{e(p['name'])}</b><small>{e(who)}</small><small><span class="lime">{visit_day}</span> · {e(d['name'])}{' · ' + e(d['speciality']) if d['speciality'] else ''}</small></div></header>
+<div class="secs">{soap or '<p>—</p>'}</div>
+{rx_html}
+<footer><div class="s">{signed}</div><div class="sign">Doctor's signature</div></footer>
+</div>{'<script>onload=()=>setTimeout(print,300)</script>' if auto else ''}"""

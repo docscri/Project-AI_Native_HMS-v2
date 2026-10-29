@@ -906,3 +906,17 @@ table.members tr.click:hover td:first-child b { text-decoration-color: var(--ink
 }
 .my-leave-row { grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) auto !important; }
 .coll-row { grid-template-columns: 52px minmax(0, 1fr) auto auto auto !important; align-items: center; gap: 14px; }
+
+/* ---------- note pop-up ---------- */
+.modal.wide:has(.nv) { width: min(860px, 100%); padding: 0; overflow: hidden; }
+.nv { display: flex; flex-direction: column; max-height: 88vh; }
+.nv-top { display: flex; align-items: center; gap: 12px; padding: 26px 30px 18px; }
+.nv-top h2 { margin: 0 0 2px; font-size: 24px; }
+.nv-top .grow { flex: 1; }
+.cx-side-btn.close.nv-x { background: var(--ink); color: var(--surface); border: 0; }
+.cx-side-btn.close.nv-x:hover { color: var(--lime); transform: none; }
+.nv-body { overflow-y: auto; scrollbar-width: none; padding: 8px 30px 24px; }
+.nv-body::-webkit-scrollbar { display: none; }
+.nv-body .soap-read { padding-bottom: 8px; }
+.nv-body span.cited { cursor: default; }
+.nv-dock { margin: 0 18px 18px; width: auto; animation: none; }

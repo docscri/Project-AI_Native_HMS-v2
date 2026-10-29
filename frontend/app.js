@@ -636,6 +636,7 @@ function restoreFree() {
 const ICON = {
   pause: '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><rect x="6.5" y="5" width="3.6" height="14" rx="1.4"/><rect x="13.9" y="5" width="3.6" height="14" rx="1.4"/></svg>',
   play: '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M8 5.6v12.8a1 1 0 0 0 1.5.86l10.2-6.4a1 1 0 0 0 0-1.72L9.5 4.74A1 1 0 0 0 8 5.6z"/></svg>',
+  x: '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>',
   stop: '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2.5"/></svg>',
 };
 const WAVE = [4, 9, 14, 7, 11, 5, 3, 16, 10, 6, 12, 8, 5, 13, 18, 7, 11, 6, 9, 4];
@@ -708,20 +709,24 @@ function paneNote(v) {
   if (S.drafting === v.id) return `<div class="note-gen"><i></i><i></i><i></i></div>`;
   if (!n) return `<div class="cx-empty">—</div>`;
   if (S.noteEdit && !signed) return noteEditor(n, false);
+  return soapRead(v, n);
+}
+// The note as read: S/O/A/P tiles, numbered sentences, phrases from the sources underlined.
+function soapRead(v, n, still) {
   let num = 0;
   const sec = (k, label, body) => `<div class="soap-sec"><b class="soap-tile">${k}</b><div><span class="soap-label">${label}</span><div class="soap-body">${body}</div></div></div>`;
   const out = SOAP.map(([k, label]) => {
     const text = (n.content.soap[k] || "").trim();
     const sents = text ? text.match(/[^.!?]+[.!?]*/g).map(x => x.trim()).filter(Boolean) : [];
     const srcs = (n.citations?.[k] || []).map(id => ({ id, text: sourceOf(v, id)?.text || "" }));
-    return sec(k, label, sents.map(t => `<span class="nb">${++num}</span>${marked(t, srcs)}`).join(" ") || `<span class="muted">—</span>`);
+    return sec(k, label, sents.map(t => `<span class="nb">${++num}</span>${marked(t, srcs, still)}`).join(" ") || `<span class="muted">—</span>`);
   }).join("");
   const rx = n.content.rx.filter(r => r.medicine);
   return `<div class="soap-read">${out}${rx.length ? sec("Rx", "Prescription", rx.map(r => `<div class="rx-line"><span class="nb">${++num}</span><b>${esc(r.medicine)}</b>${[r.dose, r.duration, r.instructions].filter(Boolean).map(x => ` · ${esc(x)}`).join("")}</div>`).join("")) : ""}</div>`;
 }
 // Underline the words of a sentence that come straight from its sources; clicking one opens that source.
 const STOP = new Set("a an the and or of to in on at for with by is are was were be been has have had this that it its as from no not patient patients reports reported says said complains denies looks like seems tab tablet order rule out once twice daily mg ml for since".split(" "));
-function marked(sentence, srcs) {
+function marked(sentence, srcs, still) {
   const words = sentence.split(/(\s+)/), norm = w => w.toLowerCase().replace(/[^a-z0-9/]/g, "");
   const toks = words.map((w, i) => ({ w, i, n: /\s/.test(w) ? null : norm(w) })).filter(t => t.n !== null);
   // Candidate phrases: up to 3 words found together in a source, trimmed of filler words; keep the 2 most telling.
@@ -742,7 +747,7 @@ function marked(sentence, srcs) {
   }
   if (!marks.length) return esc(sentence);
   const byTok = new Map(); marks.forEach(m => { byTok.set(toks[m.a].i, { start: true, id: m.id }); byTok.set(toks[m.b].i, { ...(byTok.get(toks[m.b].i) || {}), end: true, id: m.id }); });
-  return words.map((w, i) => { const m = byTok.get(i); return (m?.start ? `<button class="cited" data-a="cite" data-v="${m.id}">` : "") + esc(w) + (m?.end ? "</button>" : ""); }).join("");
+  return words.map((w, i) => { const m = byTok.get(i); return (m?.start ? (still ? `<span class="cited">` : `<button class="cited" data-a="cite" data-v="${m.id}">`) : "") + esc(w) + (m?.end ? (still ? "</span>" : "</button>") : ""); }).join("");
 }
 function noteDock(v) {
   const n = v.note, signed = n?.status === "signed";
@@ -886,10 +891,21 @@ function profile(p) {
       <div class="muted">${ageOf(p.dob)} ${esc(p.sex || "")} · <span class="mono">${esc(p.uhid)}</span> · ${esc(p.phone)}</div>${p.address ? `<div class="muted">${esc(p.address)}</div>` : ""}</div><span class="actions" style="gap:6px"><button class="btn small" data-a="pt-edit" data-v="${p.id}">Edit</button><button class="btn small" data-a="pt-merge" data-v="${p.id}">Merge</button></span></div>
     <span class="label">Visit history</span>
     ${visits.length ? `<div class="timeline">${visits.map(v => `<div class="tl"><div class="tl-head"><b>${longDate(v.date)}</b><span>${esc(v.doctor)}</span>${pill(v.status)}</div>
-      <div class="items">${v.note ? `<button class="btn small" data-a="print" data-v="${v.note.id}">${v.note.status === "signed" ? "Note & prescription" : "Draft note"}</button>` : ""}
+      <div class="items">${v.note ? `<button class="btn small" data-a="note-view" data-v="${v.id}">${v.note.status === "signed" ? "Note & prescription" : "Draft note"}</button>` : ""}
       ${v.documents.map(d => `<button class="btn small" data-a="open-doc" data-v="${d.id}">📄 ${esc(d.filename)}</button>`).join("")}</div>
       ${v.note?.soap?.A ? `<div class="muted" style="font-size:13.5px;margin-top:6px">${esc(v.note.soap.A)}</div>` : ""}</div>`).join("")}</div>` : `<div class="empty">—</div>`}
   </section>`;
+}
+async function openNoteView(visitId) {
+  const v = await api(`/visits/${visitId}`), n = v.note;
+  if (!n) return;
+  const signed = n.status === "signed", when = ts => { const d = new Date(ts); return `${d.getDate()} ${d.toLocaleDateString("en-IN", { month: "short" })}, ${d.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }).toLowerCase()}`; };
+  M = { kind: "note-view", noteId: n.id };
+  modal(`<div class="nv">
+    <div class="nv-top"><div><h2>${esc(v.patient_name)}${v.age != null ? ", " + v.age : ""}</h2><span class="muted">${longDate(v.date)} · ${esc(v.doctor_name)}</span></div>
+      <span class="grow"></span><span class="pill ${signed ? "s-paid" : "s-waiting"}">${signed ? "Signed" : "Draft"}</span><button class="cx-side-btn close nv-x" data-a="close" aria-label="Close">${ICON.x}</button></div>
+    <div class="nv-body">${soapRead(v, n, true)}</div>
+    <div class="dock nv-dock"><span class="dock-msg ${signed ? "ok" : ""}">${signed ? `Signed · ${when(n.signed_at)} · ${esc(v.doctor_name)}` : "Draft · not signed"}</span><span class="grow"></span>${signed ? `<button class="dock-go" data-a="note-print" data-v="${n.id}">Print</button>` : ""}</div></div>`, true);
 }
 function renderFollowUp() {
   const opts = [[3, "3 days"], [7, "1 week"], [14, "2 weeks"], [30, "1 month"]];
@@ -1210,6 +1226,8 @@ document.addEventListener("click", e => {
       case "rx-del": { const n = D.cur.note; n.content = readNote(); n.content.rx.splice(Number(v), 1); rerenderNote(); break; }
       case "note-save": await api(`/notes/${v}`, { method: "PUT", body: readNote() }); toast("Draft saved"); refreshConsult(); break;
       case "note-sign": await api(`/notes/${v}`, { method: "PUT", body: readNote() }); await api(`/notes/${v}/sign`, { body: {} }); toast("Signed. Visit complete."); refreshConsult(); break;
+      case "note-view": await openNoteView(Number(v)); break;
+      case "note-print": window.open(`/api/notes/${v}/print?auto=1&token=${encodeURIComponent(S.token)}`, "_blank"); break;
       case "print": window.open(`/api/notes/${v}/print?token=${encodeURIComponent(S.token)}`, "_blank"); break;
       case "open-doc": { const res = await fetch(`/api/documents/${v}/file`, { headers: { Authorization: "Bearer " + S.token } }); window.open(URL.createObjectURL(await res.blob()), "_blank"); break; }
       case "cite": if (v.startsWith("T")) { const p = paragraphs(freeText(D.cur))[Number(v.slice(1)) - 1]; if (!p) break;
