@@ -112,9 +112,13 @@ def forgot(body: Forgot, db=Depends(get_db)):
     m = row(db.execute("select * from members where lower(email) = lower(?) and status = 'active'", (body.email.strip(),)).fetchone())
     if m:
         code = make_reset(db, m["id"])
+        link = f"{mailer.app_url()}/#/reset/{code}"
         mailer.send(m["email"], "Reset your Dictate password",
                     f"Hello {m['name']},\n\nOpen this link within {RESET_HOURS} hours to set a new password:\n"
-                    f"{mailer.app_url()}/#/reset/{code}\n\nIf you did not ask for this, ignore this email.")
+                    f"{link}\n\nIf you did not ask for this, ignore this email.",
+                    mailer.branded(clinic_of(db, m)["name"] or "Dictate", "Reset your password",
+                                   f"Hello {m['name']}, tap the button to set a new password.",
+                                   "Set new password", link, f"The link works for {RESET_HOURS} hours. If you didn't ask for this, ignore this email."))
     return {"ok": True, "email_sent": mailer.enabled()}
 
 
@@ -330,9 +334,13 @@ def add_member(body: NewMember, me=Depends(require_admin), db=Depends(get_db)):
 def send_invite(db, me, member_id: int, code: str) -> None:
     m = row(db.execute("select name, email from members where id = ?", (member_id,)).fetchone())
     clinic = clinic_of(db, me)
+    link = f"{mailer.app_url()}/#/invite/{code}"
     mailer.send(m["email"], f"Join {clinic['name']} on Dictate",
                 f"Hello {m['name']},\n\n{me['name']} has invited you to {clinic['name']}.\n"
-                f"Open this link within {INVITE_DAYS} days to set your password:\n{mailer.app_url()}/#/invite/{code}")
+                f"Open this link within {INVITE_DAYS} days to set your password:\n{link}",
+                mailer.branded(clinic["name"], f"Join {clinic['name']}",
+                               f"Hello {m['name']}, {me['name']} has invited you to the clinic's team on Dictate. Set your password to get started.",
+                               "Accept invitation", link, f"The link works for {INVITE_DAYS} days."))
 
 
 @router.post("/members/{member_id}/invite")
