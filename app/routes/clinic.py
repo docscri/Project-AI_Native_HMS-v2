@@ -35,6 +35,11 @@ def clean_phone(phone: str | None) -> str:
     return phone
 
 
+def allowed_screens(screens: list[str], kind: str, is_admin: bool) -> list[str]:
+    """Administration needs admin access; consultation is only for doctors."""
+    return [x for x in screens if x in SCREENS and (x != "administration" or is_admin) and (x != "consultation" or kind == "doctor")]
+
+
 def public_clinic(c: dict) -> dict:
     c = dict(c)
     c["days"] = json.loads(c["days"])
@@ -324,7 +329,7 @@ def add_member(body: NewMember, me=Depends(require_admin), db=Depends(get_db)):
            designation, fee_override, screens) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (me["clinic_id"], body.kind, int(body.is_admin), body.name.strip(), email, clean_phone(body.phone), code, later(days=INVITE_DAYS),
          body.speciality if body.kind == "doctor" else None, body.designation if body.kind == "staff" else None,
-         body.fee_override if body.kind == "doctor" else None, json.dumps([s for s in body.screens if s in SCREENS])),
+         body.fee_override if body.kind == "doctor" else None, json.dumps(allowed_screens(body.screens, body.kind, body.is_admin))),
     ).lastrowid
     log_event(db, me["clinic_id"], me["id"], "member", mid, "invited", {"email": email})
     send_invite(db, me, mid, code)
@@ -405,7 +410,10 @@ def update_member(member_id: int, body: MemberUpdate, me=Depends(require_admin),
             "select 1 from visits where doctor_id = ?", (member_id,)).fetchone():
         raise HTTPException(409, "Doctor has visits. Can't change.")
     changes = body.model_dump(exclude_none=True, exclude={"clear_fee"})
-    if "screens" in changes:
+    if not m["is_owner"] and ("screens" in changes or "is_admin" in changes or "kind" in changes):
+        cur = json.loads(m["screens"]) if "screens" not in changes else changes["screens"]
+        changes["screens"] = json.dumps(allowed_screens(cur, changes.get("kind", m["kind"]), changes.get("is_admin", bool(m["is_admin"]))))
+    elif "screens" in changes:
         changes["screens"] = json.dumps([s for s in changes["screens"] if s in SCREENS])
     if "work_days" in changes:
         changes["work_days"] = json.dumps(sorted({d for d in changes["work_days"] if 0 <= d <= 6}))

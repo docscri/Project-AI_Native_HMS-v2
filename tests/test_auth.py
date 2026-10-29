@@ -101,3 +101,17 @@ def test_edit_own_profile():
         h = {"Authorization": "Bearer " + c.post("/api/onboarding/owner", json={"name": "Dr. Me", "email": "me1@x.in", "password": "clinic123"}).json()["token"]}
         m = c.put("/api/me", headers=h, json={"name": "Dr.  Me  Two", "email": "me2@x.in", "phone": "9847000000", "speciality": "Paediatrics"}).json()
         assert m["name"] == "Dr. Me Two" and m["email"] == "me2@x.in" and m["speciality"] == "Paediatrics"
+
+
+def test_screen_rules_for_members():
+    from fastapi.testclient import TestClient
+    from app.main import app
+    with TestClient(app) as c:
+        h = {"Authorization": "Bearer " + c.post("/api/onboarding/owner", json={"name": "Dr. R", "email": "rules@x.in", "password": "clinic123"}).json()["token"]}
+        m = c.post("/api/members", headers=h, json={"name": "S", "email": "s@x.in", "kind": "staff", "screens": ["operations", "consultation", "administration"]}).json()
+        got = {x["id"]: x for x in c.get("/api/members", headers=h).json()}[m["id"]]["screens"]
+        assert got == ["operations"]
+        upd = c.patch(f"/api/members/{m['id']}", headers=h, json={"is_admin": True, "screens": ["operations", "administration"]}).json()
+        assert "administration" in upd["screens"]
+        upd = c.patch(f"/api/members/{m['id']}", headers=h, json={"is_admin": False}).json()
+        assert "administration" not in upd["screens"]

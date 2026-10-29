@@ -934,3 +934,13 @@ table.members tr.click:hover td:first-child b { text-decoration-color: var(--ink
 .date-row { display: flex; gap: 10px; flex-wrap: wrap; }
 .money-bar { align-items: center; }
 .money-bar .btn { min-height: 48px; }
+
+/* bottom bar: smaller, with breathing room from the card edges */
+.cx-float .dock { width: min(560px, calc(100% - 64px)); min-height: 54px; padding: 6px 6px 6px 22px; gap: 8px; }
+.cx-float .dock.rec { padding-left: 24px; }
+.cx-float .dock-msg { font-size: 13px; }
+.cx-float .dock-ghost { min-height: 40px; padding: 0 16px; font-size: 14px; }
+.cx-float .dock-go { min-height: 42px; padding: 0 20px; font-size: 14.5px; }
+.cx-float .dock-round { width: 40px; height: 40px; }
+.cx-float .dock-stop { width: 42px; height: 42px; box-shadow: 0 0 0 5px color-mix(in srgb, var(--coral) 22%, transparent); }
+.cx-float .dock-wave { height: 32px; }

@@ -526,8 +526,8 @@ function openMember(kind, m) {
     ${k === "staff" ? `<div class="rule-group"><span class="rule-label">Working days</span><div class="day-dots">${["S", "M", "T", "W", "T", "F", "S"].map((d, i) => `<label><input type="checkbox" id="mb-d${i}" ${(m.work_days ? JSON.parse(m.work_days) : S.clinic.days).includes(i) ? "checked" : ""}><span>${d}</span></label>`).join("")}</div></div>
       <div class="grid2"><label class="field">Starts<input type="time" id="mb-ws" value="${esc(m.work_start || S.clinic.start || "09:00")}"></label><label class="field">Ends<input type="time" id="mb-we" value="${esc(m.work_end || S.clinic.end || "17:00")}"></label></div>` : ""}` : ""}
     <div class="field">Screens</div>
-    <div class="days">${SCREENS.map(([key, , l]) => `<label><input type="checkbox" id="mb-s-${key}" ${screens.includes(key) || locked ? "checked" : ""} ${locked ? "disabled" : ""}>${l}</label>`).join("")}</div>
-    <div class="toggles"><label class="choice"><input type="checkbox" id="mb-admin" ${m?.is_admin ? "checked" : ""} ${locked ? "disabled" : ""}><span><b>Admin access</b></span></label>
+    <div class="days">${SCREENS.filter(([key]) => key !== "consultation" || k === "doctor").map(([key, , l]) => `<label><input type="checkbox" id="mb-s-${key}" ${screens.includes(key) || locked ? "checked" : ""} ${locked || (key === "administration" && !m?.is_admin) ? "disabled" : ""}>${l}</label>`).join("")}</div>
+    <div class="toggles"><label class="choice"><input type="checkbox" id="mb-admin" data-a="mb-admin" ${m?.is_admin ? "checked" : ""} ${locked ? "disabled" : ""}><span><b>Admin access</b></span></label>
     ${m && !m.is_owner && m.status !== "invited" ? `<label class="choice"><input type="checkbox" id="mb-active" ${m.status === "active" ? "checked" : ""}><span><b>Active</b></span></label>` : ""}</div>
     <div class="foot">${m && !m.is_owner ? `<button class="btn danger" data-a="mb-remove" style="margin-right:auto">Remove</button>` : ""}${m?.status === "invited" ? `<button class="btn" data-a="renew-invite" data-v="${m.id}">Copy invite link</button>` : ""}${m?.status === "active" && !m.is_owner ? `<button class="btn" data-a="reset-link" data-v="${m.id}">Password reset link</button>` : ""}${m && k === "doctor" ? `<button class="btn" data-a="mb-schedule" data-v="${m.id}">Schedule</button>` : ""}
       <button class="btn" data-a="close">Cancel</button><button class="btn primary" data-a="mb-save">${m ? "Save" : "Send invitation"}</button></div>`);
@@ -535,7 +535,7 @@ function openMember(kind, m) {
 async function saveMember() {
   const { mkind, m } = M, own = $('[data-a="mb-fee-mode"][data-v="own"]')?.getAttribute("aria-pressed") === "true";
   const body = { name: $("#mb-name").value, phone: $("#mb-phone").value, email: $("#mb-email").value,
-    screens: SCREENS.map(s => s[0]).filter(k => $("#mb-s-" + k).checked), is_admin: $("#mb-admin").checked,
+    screens: SCREENS.map(s => s[0]).filter(k => $("#mb-s-" + k)?.checked), is_admin: $("#mb-admin").checked,
     ...(mkind === "doctor" ? { speciality: $("#mb-spec").value, fee_override: own ? Number($("#mb-fee").value) || 0 : null } : { designation: $("#mb-spec").value }) };
   if (m) {
     if (!m.is_owner) body.kind = mkind;
@@ -756,7 +756,7 @@ function noteDock(v) {
     const canDraft = v.status === "with_doctor" && (freeText(v).trim() || v.documents.some(d => d.ai_status === "ready"));
     return canDraft ? `<div class="dock"><span class="grow"></span><button class="dock-go" data-a="cs-draft" data-v="${v.id}">Generate SOAP note</button></div>` : "";
   }
-  if (signed) return `<div class="dock"><span class="dock-msg ok">Signed · ${esc((n.signed_at || "").replace("T", " ").slice(0, 16))}</span><span class="grow"></span><button class="dock-ghost" data-a="print" data-v="${n.id}">Print</button></div>`;
+  if (signed) return `<div class="dock"><span class="dock-msg ok">Signed · ${stampOf(n.signed_at)}</span><span class="grow"></span><button class="dock-go" data-a="note-print" data-v="${n.id}">Print</button></div>`;
   if (S.noteEdit) return `<div class="dock"><span class="dock-msg">Editing.</span><span class="grow"></span><button class="dock-go" data-a="note-done">Save</button></div>`;
   return `<div class="dock"><span class="dock-msg">${Object.values(n.citations || {}).some(x => x.length) ? "Drafted by AI." : "Draft."}</span><span class="grow"></span>
     <button class="dock-ghost" data-a="note-edit">Edit</button>${v.status === "with_doctor" ? `<button class="dock-ghost" data-a="cs-draft" data-v="${v.id}">Revalidate</button>` : ""}<button class="dock-go" data-a="note-sign-ro" data-v="${n.id}">Sign note</button></div>`;
@@ -896,6 +896,7 @@ function profile(p) {
       ${v.note?.soap?.A ? `<div class="muted" style="font-size:13.5px;margin-top:6px">${esc(v.note.soap.A)}</div>` : ""}</div>`).join("")}</div>` : `<div class="empty">—</div>`}
   </section>`;
 }
+const stampOf = ts => { const d = new Date(ts); return `${d.getDate()} ${d.toLocaleDateString("en-IN", { month: "short" })}, ${d.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }).toLowerCase()}`; };
 async function openNoteView(visitId) {
   const v = await api(`/visits/${visitId}`), n = v.note;
   if (!n) return;
@@ -911,7 +912,7 @@ function renderFollowUp() {
   const opts = [[3, "3 days"], [7, "1 week"], [14, "2 weeks"], [30, "1 month"]];
   modal(`<h2>Follow-up</h2>
     <div class="seg">${opts.map(([n, l]) => `<button data-a="fu-pick" data-v="${n}" aria-pressed="${addDays(TODAY, n) === M.date}">${l}</button>`).join("")}</div>
-    <label class="field">Date<input type="date" id="fu-date" min="${addDays(TODAY, 1)}" value="${M.date}"></label>
+    <input class="date-pill" aria-label="Date" type="date" id="fu-date" min="${addDays(TODAY, 1)}" value="${M.date}">
     <div class="foot"><button class="btn" data-a="close">Back</button><button class="btn primary" data-a="fu-go">Book</button></div>`);
 }
 function renderMerge() {
@@ -1070,7 +1071,7 @@ document.addEventListener("click", e => {
   const t = e.target.closest("[data-a]"); if (!t) return;
   const a = t.dataset.a, v = t.dataset.v;
   if (a === "scrim") { if (e.target === t && M?.kind !== "sched") closeModal(); return; }
-  if (["lim", "mr-range", "lvm-m", "lvm-y", "rgm-m", "rgm-y", "free-text", "up-file", "mg-q", "vf-q", "vf-doc", "pay-disc", "bk-q", "pt-q", "cs-q", "bk-date", "bk-doc", "sc-doc", "sc-month-picker", "sc-year-picker", "cs-doc"].includes(a)) return;
+  if (["lim", "mb-admin", "mr-range", "lvm-m", "lvm-y", "rgm-m", "rgm-y", "free-text", "up-file", "mg-q", "vf-q", "vf-doc", "pay-disc", "bk-q", "pt-q", "cs-q", "bk-date", "bk-doc", "sc-doc", "sc-month-picker", "sc-year-picker", "cs-doc"].includes(a)) return;
   e.preventDefault();
   const D = S.data;
   run(async () => {
@@ -1274,6 +1275,7 @@ document.addEventListener("input", e => {
 document.addEventListener("change", e => {
   const a = e.target.dataset?.a;
   if (a === "ops-date") { S.date = e.target.value || TODAY; route(); }
+  if (a === "mb-admin") { const box = $("#mb-s-administration"); if (box) { box.disabled = !e.target.checked; if (!e.target.checked) box.checked = false; } }
   if (a === "mr-range") { const from = $("#mr-from").value || TODAY, to = $("#mr-to").value || from; Object.assign(S.mon, from <= to ? { from, to } : { from: to, to: from }); route(); }
   if (/^(lvm|rgm)-[my]$/.test(a)) { const [y, m] = S.adm.month.split("-").map(Number); const nm = a.endsWith("-m") ? Number(e.target.value) : m, ny = a.endsWith("-y") ? Number(e.target.value) : y; S.adm.month = `${ny}-${String(nm).padStart(2, "0")}`; route(); }
   if (a === "vf-doc") { S.vf.doc = e.target.value; const r = $("#ops-rows"); if (r && S.data?.visits) r.innerHTML = opsRows(S.data.visits); }
