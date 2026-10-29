@@ -1,46 +1,99 @@
 import hashlib
 import json
 import secrets
+from datetime import datetime, timedelta
 
 from fastapi import Depends, Header, HTTPException
 
-from .db import get_db, row
+from .db import get_db, now, row
 
 SCREENS = ["operations", "patients", "consultation", "administration"]
+SESSION_HOURS = 12          # sliding: each use pushes expiry forward
+MAX_FAILED_LOGINS = 5
+LOCK_MINUTES = 15
+RESET_HOURS = 2
+INVITE_DAYS = 7
+MIN_PASSWORD = 8
 
 
 def hash_password(password: str) -> str:
-    salt = secrets.token_hex(8)
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 100_000).hex()
-    return f"{salt}${digest}"
+    salt = secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 310_000).hex()
+    return f"pbkdf2$310000${salt}${digest}"
 
 
 def check_password(password: str, stored: str | None) -> bool:
     if not stored:
         return False
-    salt, digest = stored.split("$")
-    return hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), 100_000).hex() == digest
+    parts = stored.split("$")
+    if len(parts) == 4:
+        _, rounds, salt, digest = parts
+    else:  # older format: salt$digest at 100k rounds
+        rounds, (salt, digest) = "100000", parts
+    calc = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), int(rounds)).hex()
+    return secrets.compare_digest(calc, digest)
 
 
-def new_token() -> str:
-    return secrets.token_urlsafe(24)
+def validate_password(password: str) -> None:
+    if len(password) < MIN_PASSWORD:
+        raise HTTPException(422, f"Password must be at least {MIN_PASSWORD} characters.")
+    if password.isdigit() or password.isalpha():
+        raise HTTPException(422, "Use letters and numbers in the password.")
+
+
+def token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def later(**kw) -> str:
+    return (datetime.now() + timedelta(**kw)).isoformat(timespec="seconds")
+
+
+def create_session(db, member_id: int) -> str:
+    token = secrets.token_urlsafe(32)
+    db.execute("insert into sessions (token_hash, member_id, created_at, expires_at) values (?, ?, ?, ?)",
+               (token_hash(token), member_id, now(), later(hours=SESSION_HOURS)))
+    db.execute("delete from sessions where expires_at < ?", (now(),))
+    return token
+
+
+def end_sessions(db, member_id: int, keep: str | None = None) -> None:
+    db.execute("delete from sessions where member_id = ? and token_hash is not ?", (member_id, keep and token_hash(keep)))
+
+
+def new_code() -> str:
+    return secrets.token_urlsafe(16)
 
 
 def public_member(m: dict) -> dict:
     m = dict(m)
-    for key in ("password_hash", "token"):
+    for key in ("password_hash", "token", "failed_logins", "locked_until"):
         m.pop(key, None)
     m["screens"] = SCREENS if m["is_owner"] else json.loads(m["screens"])
     m["is_owner"] = bool(m["is_owner"])
     m["is_admin"] = bool(m["is_admin"] or m["is_owner"])
+    m["invite_expired"] = bool(m.get("invite_expires_at") and m["invite_expires_at"] < now())
     return m
 
 
+def member_for_token(db, token: str) -> dict | None:
+    if not token:
+        return None
+    s = row(db.execute(
+        """select s.token_hash, s.expires_at, m.* from sessions s join members m on m.id = s.member_id
+           where s.token_hash = ? and m.status = 'active'""", (token_hash(token),)).fetchone())
+    if not s or s["expires_at"] < now():
+        return None
+    if s["expires_at"] < later(hours=SESSION_HOURS - 0.25):  # refresh at most every 15 minutes
+        db.execute("update sessions set expires_at = ? where token_hash = ?", (later(hours=SESSION_HOURS), s["token_hash"]))
+    s.pop("token_hash"), s.pop("expires_at")
+    return s
+
+
 def current_member(authorization: str = Header(default=""), db=Depends(get_db)) -> dict:
-    token = authorization.removeprefix("Bearer ").strip()
-    m = row(db.execute("select * from members where token = ? and status = 'active'", (token,)).fetchone()) if token else None
+    m = member_for_token(db, authorization.removeprefix("Bearer ").strip())
     if not m:
-        raise HTTPException(401, "Please log in.")
+        raise HTTPException(401, "Your session has ended. Please log in again.")
     return public_member(m)
 
 

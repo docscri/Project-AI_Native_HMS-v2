@@ -33,6 +33,7 @@ def get_patient(db, me, patient_id: int) -> dict:
 
 @router.post("")
 def register(body: PatientIn, me=Depends(current_member), db=Depends(get_db)):
+    db.lock(f"uhid:{me['clinic_id']}")
     c = row(db.execute("select uhid_prefix, next_uhid from clinics where id = ?", (me["clinic_id"],)).fetchone())
     uhid = f'{c["uhid_prefix"]}-{c["next_uhid"]:04d}'
     db.execute("update clinics set next_uhid = next_uhid + 1 where id = ?", (me["clinic_id"],))

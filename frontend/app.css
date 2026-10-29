@@ -719,3 +719,10 @@ table.members tr.click:hover td:first-child b { text-decoration-color: var(--ink
 .panel .day-dots span, .panel .pick-seg { background: var(--tile-2); }
 .panel .day-dots input:checked + span { background: var(--ink); }
 .rule-row .field { width: 180px; }
+
+/* ---------- account + login links ---------- */
+.me-open { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; margin-left: 0 !important; background: none; border: 0; color: inherit; cursor: pointer; padding: 4px 6px; border-radius: 14px; text-align: left; transition: background .2s; }
+.me-open:hover { background: var(--frame-2); }
+.dot-sep { margin: 0 10px; color: var(--frame-muted); }
+.login-card .login-sub { margin: 0 0 22px; }
+.login-card .login-title { margin-bottom: 6px; color: var(--surface); }

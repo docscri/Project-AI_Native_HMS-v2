@@ -179,6 +179,7 @@ def visit_out(db, me, visit_id: int) -> dict:
 
 @router.post("/visits")
 def book(body: Booking, me=Depends(front_desk), db=Depends(get_db)):
+    db.lock(f"tokens:{body.doctor_id}:{body.date}")
     if body.date < Date.today().isoformat():
         raise HTTPException(422, "Pick today or a later date.")
     clinic = clinic_of(db, me)
@@ -198,6 +199,7 @@ def book(body: Booking, me=Depends(front_desk), db=Depends(get_db)):
 @router.post("/visits/walk-in")
 def walk_in(body: WalkIn, me=Depends(front_desk), db=Depends(get_db)):
     """Patient at the counter, no booking: pay, get the next token, go straight to Waiting."""
+    db.lock(f"tokens:{body.doctor_id}:{Date.today().isoformat()}")
     clinic, today = clinic_of(db, me), Date.today().isoformat()
     check_patient_free(db, me, body.patient_id, body.doctor_id, today)
     avail = require_bookable(db, clinic, body.doctor_id, today)
@@ -215,6 +217,8 @@ def walk_in(body: WalkIn, me=Depends(front_desk), db=Depends(get_db)):
 def arrive(visit_id: int, body: Pay, me=Depends(front_desk), db=Depends(get_db)):
     """Arrived → collect fee → token (if given at arrival) → Waiting."""
     v = get_visit(db, me, visit_id)
+    db.lock(f"tokens:{v['doctor_id']}:{v['date']}")
+    v = get_visit(db, me, visit_id)
     if v["date"] != Date.today().isoformat():
         raise HTTPException(409, "Patients can only arrive on the day of their visit.")
     clinic, ts = clinic_of(db, me), now()
@@ -227,6 +231,7 @@ def arrive(visit_id: int, body: Pay, me=Depends(front_desk), db=Depends(get_db))
 
 @router.post("/visits/{visit_id}/reschedule")
 def reschedule(visit_id: int, body: Reschedule, me=Depends(front_desk), db=Depends(get_db)):
+    db.lock(f"tokens:{body.doctor_id}:{body.date}")
     v = get_visit(db, me, visit_id)
     if v["status"] != "booked":
         raise HTTPException(409, "Only bookings that haven't arrived can be rescheduled.")

@@ -8,7 +8,7 @@ create table if not exists clinics (
     fee integer not null default 300,
     days text not null default '[1,2,3,4,5,6]',          -- weekdays, 0 = Sunday
     start text not null default '09:00',
-    end text not null default '12:00',
+    "end" text not null default '12:00',
     limit_by text not null default 'patients' check (limit_by in ('patients', 'minutes')),
     limit_value integer not null default 30,
     token_timing text not null default 'booking' check (token_timing in ('booking', 'arrival')),
@@ -45,7 +45,7 @@ create table if not exists schedule_overrides (
     date text not null,
     is_off integer not null default 0,
     start text,
-    end text,
+    "end" text,
     limit_by text,
     limit_value integer,
     unique (doctor_id, date)

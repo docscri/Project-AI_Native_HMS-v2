@@ -31,16 +31,11 @@ def _gemini(parts: list[dict]) -> dict:
 
 # ---------- documents ----------
 
-def extract_document(path: str, mime: str, filename: str) -> dict:
+def extract_document(data: bytes, mime: str, filename: str) -> dict:
     """Returns {"summary": str, "findings": [{"name", "value", "unit"}]}."""
     if enabled() and (mime or "").split("/")[0] in ("image", "application"):
-        with open(path, "rb") as f:
-            data = base64.b64encode(f.read()).decode()
-        return _gemini([{"text": _prompt("extract.txt")}, {"inline_data": {"mime_type": mime, "data": data}}])
-    text = ""
-    if (mime or "").startswith("text"):
-        with open(path, errors="ignore") as f:
-            text = f.read()[:4000]
+        return _gemini([{"text": _prompt("extract.txt")}, {"inline_data": {"mime_type": mime, "data": base64.b64encode(data).decode()}}])
+    text = data.decode(errors="ignore")[:4000] if (mime or "").startswith("text") else ""
     findings = [{"name": n.strip(), "value": v, "unit": u.strip()}
                 for n, v, u in re.findall(r"([A-Za-z][A-Za-z0-9 ]{1,20})[:\s]+(\d+(?:\.\d+)?)\s*([a-zA-Z/%]*)", text)][:10]
     return {"summary": text[:300] or f"Uploaded document: {filename}", "findings": findings}

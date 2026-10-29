@@ -2,16 +2,15 @@
 import html
 import json
 import mimetypes
-import uuid
 from datetime import date as Date
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel
 
-from .. import ai
-from ..auth import current_member, require_screen
-from ..db import UPLOAD_DIR, connect, get_db, log_event, now, row, rows
+from .. import ai, storage
+from ..auth import current_member, member_for_token, require_screen
+from ..db import connect, get_db, log_event, now, row, rows
 from .clinic import clinic_of
 from .operations import get_visit, move, visit_rows
 
@@ -146,7 +145,7 @@ def run_extraction(doc_id: int) -> None:
     try:
         d = row(db.execute("select * from documents where id = ?", (doc_id,)).fetchone())
         try:
-            ex = ai.extract_document(d["path"], d["mime"], d["filename"])
+            ex = ai.extract_document(storage.read(d["path"]), d["mime"], d["filename"])
             db.execute("update documents set ai_status = 'ready', extracted = ? where id = ?", (json.dumps(ex), doc_id))
         except Exception as e:  # keep the file; mark it so the UI can say so
             db.execute("update documents set ai_status = 'failed', extracted = ? where id = ?",
@@ -160,10 +159,17 @@ def run_extraction(doc_id: int) -> None:
 async def upload(visit_id: int, tasks: BackgroundTasks, file: UploadFile = File(...),
                  me=Depends(current_member), db=Depends(get_db)):
     v = get_visit(db, me, visit_id)
-    ext = (file.filename or "").rsplit(".", 1)[-1][:8] if "." in (file.filename or "") else "bin"
-    path = UPLOAD_DIR / f"{uuid.uuid4().hex}.{ext}"
-    path.write_bytes(await file.read())
     mime = file.content_type or mimetypes.guess_type(file.filename or "")[0] or "application/octet-stream"
+    if mime == "image/jpg":
+        mime = "image/jpeg"
+    if mime not in storage.ALLOWED:
+        raise HTTPException(415, "Upload a PDF, photo (JPG, PNG, WEBP, HEIC) or text file.")
+    data = await file.read(storage.MAX_BYTES + 1)
+    if len(data) > storage.MAX_BYTES:
+        raise HTTPException(413, "File is too large. The limit is 15 MB.")
+    if not data:
+        raise HTTPException(422, "The file is empty.")
+    path = storage.save(me["clinic_id"], data, mime)
     did = db.execute(
         "insert into documents (clinic_id, patient_id, visit_id, filename, path, mime) values (?, ?, ?, ?, ?, ?)",
         (me["clinic_id"], v["patient_id"], visit_id, file.filename or "document", str(path), mime)).lastrowid
@@ -178,7 +184,11 @@ def document_file(doc_id: int, me=Depends(current_member), db=Depends(get_db)):
     d = row(db.execute("select * from documents where id = ? and clinic_id = ?", (doc_id, me["clinic_id"])).fetchone())
     if not d:
         raise HTTPException(404, "Document not found.")
-    return FileResponse(d["path"], media_type=d["mime"], filename=d["filename"])
+    try:
+        data = storage.read(d["path"])
+    except Exception:
+        raise HTTPException(404, "The file could not be found in storage.")
+    return Response(data, media_type=d["mime"], headers={"Content-Disposition": f'inline; filename="{d["filename"]}"'})
 
 
 # ---------- notes ----------
@@ -243,7 +253,7 @@ def sign(note_id: int, me=Depends(doctor_screen), db=Depends(get_db)):
 @router.get("/notes/{note_id}/print", response_class=HTMLResponse)
 def print_note(note_id: int, token: str, db=Depends(get_db)):
     """Printable page (browser Print → Save as PDF). Token in the query so it opens in a new tab."""
-    me = row(db.execute("select * from members where token = ?", (token,)).fetchone())
+    me = member_for_token(db, token)
     n = row(db.execute("select * from notes where id = ?", (note_id,)).fetchone())
     if not me or not n or n["clinic_id"] != me["clinic_id"]:
         raise HTTPException(404, "Note not found.")

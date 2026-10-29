@@ -1,11 +1,6 @@
-"""Walks the whole clinic flow against a fresh SQLite database."""
-import os
-import tempfile
+"""Walks the whole clinic flow against a fresh database."""
 from datetime import date, timedelta
 
-os.environ["CLINIC_DATA_DIR"] = tempfile.mkdtemp()
-os.environ["SEED_DEMO"] = "0"
-os.environ.pop("GEMINI_API_KEY", None)
 
 from fastapi.testclient import TestClient  # noqa: E402
 
@@ -21,7 +16,7 @@ def auth(token):
 def test_full_flow():
     with TestClient(app) as c:
         # Onboarding: owner → clinic → rules → member
-        t = c.post("/api/onboarding/owner", json={"name": "Dr. Asha", "email": "asha@x.in", "password": "secret1"}).json()["token"]
+        t = c.post("/api/onboarding/owner", json={"name": "Dr. Asha", "email": "asha@x.in", "password": "secret123"}).json()["token"]
         h = auth(t)
         assert c.put("/api/clinic", headers=h, json={"name": "Asha Clinic", "phone": "1", "address": "Kochi"}).status_code == 200
         r = c.put("/api/clinic/rules", headers=h, json={"fee": 300, "days": [0, 1, 2, 3, 4, 5, 6], "start": "00:00", "end": "23:59",
@@ -29,7 +24,7 @@ def test_full_flow():
         assert r.json()["derived"]["max_patients"] == 23
         inv = c.post("/api/members", headers=h, json={"kind": "staff", "name": "Meera", "email": "m@x.in",
                                                        "designation": "Receptionist", "screens": ["operations", "patients"]}).json()
-        mt = c.post("/api/invites/accept", json={"code": inv["invite_code"], "password": "secret2"}).json()["token"]
+        mt = c.post("/api/invites/accept", json={"code": inv["invite_code"], "password": "secret234"}).json()["token"]
         mh = auth(mt)
         assert c.get("/api/consultation/today", headers=mh).status_code == 403
         doc = c.get("/api/me", headers=h).json()["member"]["id"]

@@ -18,7 +18,7 @@ for r in (clinic, schedules, patients, operations, consultation):
 @app.on_event("startup")
 def startup() -> None:
     db.init()
-    if os.environ.get("SEED_DEMO", "1") == "1":
+    if os.environ.get("SEED_DEMO", "0") == "1":
         from .seed import seed
         seed()
 

@@ -57,10 +57,10 @@ def set_day(doctor_id: int, date: str, body: Override, me=Depends(current_member
     if not body.is_off and body.start >= body.end:
         raise HTTPException(422, "End time must be after start time.")
     db.execute(
-        """insert into schedule_overrides (clinic_id, doctor_id, date, is_off, start, end, limit_by, limit_value)
+        """insert into schedule_overrides (clinic_id, doctor_id, date, is_off, start, "end", limit_by, limit_value)
            values (?, ?, ?, ?, ?, ?, ?, ?)
            on conflict (doctor_id, date) do update set is_off = excluded.is_off, start = excluded.start,
-             end = excluded.end, limit_by = excluded.limit_by, limit_value = excluded.limit_value""",
+             "end" = excluded."end", limit_by = excluded.limit_by, limit_value = excluded.limit_value""",
         (me["clinic_id"], doctor_id, date, int(body.is_off), body.start, body.end, body.limit_by, body.limit_value),
     )
     log_event(db, me["clinic_id"], me["id"], "schedule", doctor_id, "day_changed", {"date": date, **body.model_dump()})

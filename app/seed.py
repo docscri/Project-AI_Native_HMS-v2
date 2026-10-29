@@ -23,7 +23,7 @@ def seed() -> bool:
         return False
     today = date.today().isoformat()
     cid = db.execute(
-        """insert into clinics (name, phone, address, fee, days, start, end, limit_by, limit_value, token_timing,
+        """insert into clinics (name, phone, address, fee, days, start, "end", limit_by, limit_value, token_timing,
            uhid_prefix, next_uhid, onboarded) values ('Sunrise Clinic', '0484 240 1122', 'MG Road, Kochi', 300,
            '[1,2,3,4,5,6]', '09:00', '13:00', 'minutes', 10, 'booking', 'SC', 1, 1)""").lastrowid
     pw = hash_password("demo123")
@@ -39,9 +39,9 @@ def seed() -> bool:
     member("staff", "Meera Joseph", "meera@demo.in", ["operations", "patients"], desig="Receptionist")
 
     start, end = _session_today()
-    db.execute("insert into schedule_overrides (clinic_id, doctor_id, date, start, end, limit_by, limit_value) values (?, ?, ?, ?, ?, 'minutes', 10)",
+    db.execute("insert into schedule_overrides (clinic_id, doctor_id, date, start, \"end\", limit_by, limit_value) values (?, ?, ?, ?, ?, 'minutes', 10)",
                (cid, anjali, today, start, end))
-    db.execute("insert into schedule_overrides (clinic_id, doctor_id, date, start, end, limit_by, limit_value) values (?, ?, ?, ?, ?, 'patients', 15)",
+    db.execute("insert into schedule_overrides (clinic_id, doctor_id, date, start, \"end\", limit_by, limit_value) values (?, ?, ?, ?, ?, 'patients', 15)",
                (cid, rahul, today, start, end))
     db.execute("insert into schedule_overrides (clinic_id, doctor_id, date, is_off) values (?, ?, ?, 1)",
                (cid, rahul, (date.today() + timedelta(days=2)).isoformat()))

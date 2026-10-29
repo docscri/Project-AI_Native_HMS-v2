@@ -36,7 +36,7 @@ async function api(path, opts = {}) {
   if (body && !(body instanceof FormData)) { headers["Content-Type"] = "application/json"; body = JSON.stringify(body); }
   const res = await fetch("/api" + path, { method: opts.method || (body ? "POST" : "GET"), headers, body });
   const data = await res.json().catch(() => ({}));
-  if (res.status === 401 && !opts.quiet) { logout(); throw new Error("Please log in."); }
+  if (res.status === 401 && !opts.quiet && S.token) { endLocal(); throw new Error(data.detail || "Your session has ended. Please log in again."); }
   if (!res.ok) {
     const d = data.detail;
     throw new Error(Array.isArray(d) ? d.map(x => `${x.loc?.slice(-1)[0]}: ${x.msg}`).join(", ") : d || "Something went wrong.");
@@ -54,7 +54,8 @@ function modal(html, wide) {
 const closeModal = () => { modal(""); M = null; };
 const go = h => { if (location.hash === h) route(); else location.hash = h; };
 function setToken(t) { S.token = t; try { t ? localStorage.setItem("clinic.token", t) : localStorage.removeItem("clinic.token"); } catch {} }
-function logout() { setToken(null); S.me = null; stopTimers(); go("#/login"); }
+function endLocal() { setToken(null); S.me = null; stopTimers(); closeModal(); go("#/login"); }
+async function logout() { if (S.token) await fetch("/api/auth/logout", { method: "POST", headers: { Authorization: "Bearer " + S.token } }).catch(() => {}); endLocal(); }
 function stopTimers() { clearInterval(S.timer); S.timer = null; clearTimeout(S.docT); if (S.rec) { try { S.rec.stop(); } catch {} S.rec = null; } }
 
 /* ---------- routing ---------- */
@@ -76,6 +77,8 @@ async function route() {
   const [path, query] = (location.hash.slice(1) || "/").split("?");
   const parts = path.split("/").filter(Boolean);
   if (parts[0] === "invite") return viewInvite(parts[1]);
+  if (parts[0] === "reset") return viewReset(parts[1]);
+  if (parts[0] === "forgot" && !S.me) return viewForgot();
   if (!S.token || !S.me) return parts[0] === "signup" ? viewOnboarding(1) : viewLogin();
   if (!S.clinic.onboarded) return viewOnboarding(2);
   const allowed = SCREENS.filter(s => S.me.screens.includes(s[0]));
@@ -95,7 +98,7 @@ function shell(active) {
     <nav class="nav" aria-label="Main">
       <div class="brand"><b>Dictate</b><span>${esc(S.clinic.name)}</span></div>
       ${SCREENS.filter(s => m.screens.includes(s[0])).map(([k, h, l, i]) => `<a href="${h}" ${h.slice(2) === active ? 'aria-current="page"' : ""}>${i}${l}</a>`).join("")}
-      <div class="me"><div class="avatar">${esc(firstName(m.name)[0].toUpperCase())}</div><b>${esc(firstName(m.name))}</b><button class="logout-icon" data-a="logout" aria-label="Log out" title="Log out"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 17l5-5-5-5M15 12H3M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4"/></svg></button></div>
+      <div class="me"><button class="me-open" data-a="account" title="Account"><span class="avatar">${esc(firstName(m.name)[0].toUpperCase())}</span><b>${esc(firstName(m.name))}</b></button><button class="logout-icon" data-a="logout" aria-label="Log out" title="Log out"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 17l5-5-5-5M15 12H3M14 4h4a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-4"/></svg></button></div>
     </nav>
     <div class="stage"><main class="surface" id="view"><div class="muted">Loading…</div></main></div></div>`;
 }
@@ -115,7 +118,7 @@ function viewLogin() {
       <div class="login-pw"><input class="login-input" id="lg-pw" type="password" placeholder="Password" aria-label="Password" autocomplete="current-password">
         <button class="login-submit glow" type="submit" aria-label="Sign in">${arrowRight}</button></div>
     </form>
-    <p class="login-footer"><a class="login-link" href="#/signup">Create account</a></p></div>`);
+    <p class="login-footer"><a class="login-link" href="#/signup">Create account</a><span class="dot-sep">·</span><a class="login-link" href="#/forgot">Forgot password?</a></p></div>`);
   $("#login").addEventListener("submit", e => { e.preventDefault(); $(".login-screen").classList.add("busy"); run(async () => {
     try {
       const r = await api("/auth/login", { body: { email: $("#lg-email").value, password: $("#lg-pw").value }, quiet: true });
@@ -137,7 +140,7 @@ function viewOnboarding(step) {
   if (step === 1) obFrame(1, `<h1>Create your account</h1>
     <label class="field">Name<input id="ob-name" value="${esc(me.name || "")}"></label>
     <div class="grid2"><label class="field">Email<input id="ob-email" type="email" value="${esc(me.email || "")}" ${S.me ? "disabled" : ""}></label><label class="field">Phone<input id="ob-phone" value="${esc(me.phone || "")}"></label></div>
-    ${S.me ? "" : `<label class="field">Password<input id="ob-pw" type="password"></label>`}
+    ${S.me ? "" : `<label class="field">Password · 8+ letters &amp; numbers<input id="ob-pw" type="password" autocomplete="new-password"></label>`}
     <label class="choice"><input type="checkbox" id="ob-doc" ${me.kind === "staff" ? "" : "checked"} ${S.me ? "disabled" : ""}><span><b>I am also a doctor here</b></span></label>`);
   if (step === 2) obFrame(2, `<h1>Your clinic</h1>
     <label class="field">Clinic name<input id="ob-cname" value="${esc(S.clinic.name)}"></label>
@@ -152,7 +155,7 @@ async function loadMembersStep() {
     <div class="ob-team"><button class="btn" data-a="member-add" data-v="doctor">+ Add doctor</button><button class="btn" data-a="member-add" data-v="staff">+ Add staff</button></div>
     ${ms.length ? `<div class="rows">${ms.map(m => `<div class="r q"><b>${m.kind === "doctor" ? "Doctor" : esc(m.designation)}</b><span class="who">${esc(m.name)}</span>${inviteLink(m)}</div>`).join("")}</div>` : ""}`, "Finish setup");
 }
-const inviteLink = m => m.status === "invited" && m.invite_code ? `<button class="btn small" data-a="copy-invite" data-v="${esc(m.invite_code)}">Copy invite link</button>` : `<span class="pill s-paid">Active</span>`;
+const inviteLink = m => m.status === "invited" ? `<button class="btn small" data-a="renew-invite" data-v="${m.id}">Copy invite link</button>` : `<span class="pill s-paid">Active</span>`;
 
 async function obNext(step) {
   if (step === 1 && S.me) { await api(`/members/${S.me.id}`, { method: "PATCH", body: { name: $("#ob-name").value, phone: $("#ob-phone").value } }); S.me = (await api("/me")).member; return viewOnboarding(2); }
@@ -169,11 +172,39 @@ async function obFinish() { S.clinic = await api("/onboarding/finish", { body: {
 async function viewInvite(code) {
   await run(async () => {
     const inv = await api("/invites/" + code);
-    authPage(`<div class="login-card"><div class="login-mic">${icon.mic}</div><h1 class="login-title">${esc(inv.clinic)}</h1><p class="login-sub">${esc(inv.name)}</p>
-      <div class="login-pw"><input class="login-input" id="iv-pw" type="password" placeholder="Choose a password" aria-label="Choose a password">
-      <button class="login-submit glow" data-a="accept-invite" data-v="${esc(code)}" aria-label="Join">${arrowRight}</button></div></div>`);
-  });
+    authPage(`<div class="login-card"><h1 class="login-title">${esc(inv.clinic)}</h1><p class="login-sub">${esc(inv.name)}</p>
+      <form class="login-pw" data-form="accept-invite" data-v="${esc(code)}"><input class="login-input" id="iv-pw" type="password" placeholder="New password · 8+ letters & numbers" aria-label="New password" autocomplete="new-password">
+      <button class="login-submit glow" type="submit" aria-label="Join">${arrowRight}</button></form></div>`);
+  }).then(r => { if (!$(".login-card")) authPage(`<div class="login-card"><h1 class="login-title">Link not valid</h1><p class="login-sub">Ask the clinic for a new invitation.</p><p class="login-footer"><a class="login-link" href="#/login">Back</a></p></div>`); });
 }
+function viewForgot() {
+  authPage(`<div class="login-card"><h1 class="login-title">Reset password</h1>
+    <form class="login-pw" data-form="forgot"><input class="login-input" id="fg-email" type="email" placeholder="Email" aria-label="Email" autocomplete="username">
+    <button class="login-submit glow" type="submit" aria-label="Send reset link">${arrowRight}</button></form>
+    <p class="login-footer"><a class="login-link" href="#/login">Back</a></p></div>`);
+}
+function viewReset(code) {
+  authPage(`<div class="login-card"><h1 class="login-title">New password</h1>
+    <form class="login-pw" data-form="reset" data-v="${esc(code)}"><input class="login-input" id="rs-pw" type="password" placeholder="8+ letters & numbers" aria-label="New password" autocomplete="new-password">
+    <button class="login-submit glow" type="submit" aria-label="Save password">${arrowRight}</button></form>
+    <p class="login-footer"><a class="login-link" href="#/login">Back</a></p></div>`);
+}
+document.addEventListener("submit", e => {
+  const f = e.target.closest("[data-form]"); if (!f) return;
+  e.preventDefault(); const kind = f.dataset.form, v = f.dataset.v;
+  $(".login-screen")?.classList.add("busy");
+  run(async () => {
+    try {
+      if (kind === "accept-invite") { const r = await api("/invites/accept", { body: { code: v, password: $("#iv-pw").value } }); setToken(r.token); await boot(); go("#/"); }
+      if (kind === "reset") { const r = await api("/auth/reset", { body: { code: v, password: $("#rs-pw").value } }); setToken(r.token); await boot(); toast("Password updated"); go("#/"); }
+      if (kind === "forgot") {
+        const r = await api("/auth/forgot", { body: { email: $("#fg-email").value } });
+        authPage(`<div class="login-card"><h1 class="login-title">Check your email</h1><p class="login-sub">${r.email_sent ? "If this email has an account, a reset link is on its way." : "Ask your clinic admin for a reset link."}</p>
+          <p class="login-footer"><a class="login-link" href="#/login">Back</a></p></div>`);
+      }
+    } finally { $(".login-screen")?.classList.remove("busy"); }
+  });
+});
 
 /* clinic rules form (onboarding + admin) */
 function limitBlock(p, v) {
@@ -418,7 +449,7 @@ function openMember(kind, m) {
     <div class="days">${SCREENS.map(([key, , l]) => `<label><input type="checkbox" id="mb-s-${key}" ${screens.includes(key) || locked ? "checked" : ""} ${locked ? "disabled" : ""}>${l}</label>`).join("")}</div>
     <div class="toggles"><label class="choice"><input type="checkbox" id="mb-admin" ${m?.is_admin ? "checked" : ""} ${locked ? "disabled" : ""}><span><b>Admin access</b></span></label>
     ${m && !m.is_owner && m.status !== "invited" ? `<label class="choice"><input type="checkbox" id="mb-active" ${m.status === "active" ? "checked" : ""}><span><b>Active</b></span></label>` : ""}</div>
-    <div class="foot">${m && !m.is_owner ? `<button class="btn danger" data-a="mb-remove" style="margin-right:auto">Remove</button>` : ""}${m?.status === "invited" ? `<button class="btn" data-a="copy-invite" data-v="${esc(m.invite_code)}">Copy invite link</button>` : ""}
+    <div class="foot">${m && !m.is_owner ? `<button class="btn danger" data-a="mb-remove" style="margin-right:auto">Remove</button>` : ""}${m?.status === "invited" ? `<button class="btn" data-a="renew-invite" data-v="${m.id}">Copy invite link</button>` : ""}${m?.status === "active" && !m.is_owner ? `<button class="btn" data-a="reset-link" data-v="${m.id}">Password reset link</button>` : ""}
       <button class="btn" data-a="close">Cancel</button><button class="btn primary" data-a="mb-save">${m ? "Save" : "Send invitation"}</button></div>`);
 }
 async function saveMember() {
@@ -435,10 +466,20 @@ async function saveMember() {
     toast("Saved");
   } else {
     const r = await api("/members", { body: { ...body, kind: mkind } });
-    copyInvite(r.invite_code, `Invitation created for ${r.name}. Link copied.`);
+    copyLink(`${location.origin}/#/invite/${r.invite_code}`, `Invitation created for ${r.name} · link copied`);
   }
   S.doctors = await api("/doctors"); closeModal();
   if (OB.step === 4 && !S.clinic.onboarded) loadMembersStep(); else route();
+}
+function copyLink(link, msg) {
+  navigator.clipboard?.writeText(link).then(() => toast(msg), () => { M = { kind: "link" }; modal(`<h2>Share this link</h2><label class="field">Link<input readonly value="${esc(link)}" onfocus="this.select()"></label><div class="foot"><button class="btn primary" data-a="close">Done</button></div>`); });
+}
+function openAccount() {
+  const m = S.me; M = { kind: "account" };
+  modal(`<div class="mb-head"><div class="avatar big">${esc(firstName(m.name)[0].toUpperCase())}</div><div><h2>${esc(m.name)}</h2><span class="muted">${esc(m.email)}</span></div></div>
+    <label class="field">Current password<input id="ac-cur" type="password" autocomplete="current-password"></label>
+    <div class="grid2"><label class="field">New password<input id="ac-new" type="password" autocomplete="new-password"></label><label class="field">Repeat new password<input id="ac-new2" type="password" autocomplete="new-password"></label></div>
+    <div class="foot"><button class="btn danger" data-a="logout" style="margin-right:auto">Log out</button><button class="btn" data-a="close">Close</button><button class="btn primary" data-a="pw-save">Change password</button></div>`);
 }
 function copyInvite(code, msg) {
   const link = `${location.origin}/#/invite/${code}`;
@@ -481,7 +522,7 @@ function renderConsult() {
       <span class="grow"></span>
       ${S.doctors.length > 1 || m.kind !== "doctor" ? `<select class="cx-select" id="cs-doc" data-a="cs-doc" aria-label="Doctor">${S.doctors.map(d => `<option value="${d.id}" ${d.id === D.doctorId ? "selected" : ""}>${esc(d.name)}</option>`).join("")}</select>` : ""}
       <span class="cx-chip solid">${m.kind === "doctor" ? "Doctor" : esc(m.designation || "Staff")}</span>
-      <button class="cx-avatar" data-a="logout" title="Log out ${esc(m.name)}">${esc(initials(m.name))}</button>
+      <button class="cx-avatar" data-a="account" title="Account">${esc(firstName(m.name)[0].toUpperCase())}</button>
     </header>
     <div class="cx-body ${S.rightCollapsed ? "wide" : ""}"><button class="cx-collapse" data-a="cs-collapse" aria-label="${S.rightCollapsed ? "Show side panel" : "Hide side panel"}" title="${S.rightCollapsed ? "Show side panel" : "Hide side panel"}"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${S.rightCollapsed ? "M15 6l-6 6 6 6" : "M9 6l6 6-6 6"}"/></svg></button>
       <aside class="cx-left">${leftCol()}</aside>
@@ -687,7 +728,12 @@ document.addEventListener("click", e => {
       case "ob-next": await obNext(Number(v)); break;
       case "ob-finish": await obFinish(); break;
       case "ob-back": { const st = Number(v); if (st === 1) { if (S.me) { logout(); } else go("#/login"); } else viewOnboarding(st - 1); break; }
-      case "accept-invite": { const r = await api("/invites/accept", { body: { code: v, password: $("#iv-pw").value } }); setToken(r.token); await boot(); go("#/"); break; }
+      case "renew-invite": { const r = await api(`/members/${v}/invite`, { body: {} }); copyLink(`${location.origin}/#/invite/${r.invite_code}`, r.email_sent ? "Invite emailed · link copied" : "Invite link copied · valid 7 days"); break; }
+      case "reset-link": { const r = await api(`/members/${v}/reset-link`, { body: {} }); copyLink(`${location.origin}/#/reset/${r.code}`, "Reset link copied · valid 2 hours"); break; }
+      case "account": openAccount(); break;
+      case "pw-save": {
+        if ($("#ac-new").value !== $("#ac-new2").value) return toast("New passwords don't match", true);
+        await api("/auth/change-password", { body: { current: $("#ac-cur").value, new: $("#ac-new").value } }); closeModal(); toast("Password changed"); break; }
       case "copy-invite": copyInvite(v); break;
       case "day": S.date = addDays(S.date, Number(v)); route(); break;
       case "open-doctor": go(`#/ops/doctor/${v}`); break;
