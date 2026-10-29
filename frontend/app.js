@@ -323,6 +323,7 @@ async function viewQueue(doctorId) {
   S.date = S.date || TODAY;
   const load = async () => {
     const q = await api(`/operations/queue?doctor_id=${doctorId}&date=${S.date}`);
+    const wl = await api(`/waitlist?doctor_id=${doctorId}&date=${S.date}`);
     if (stale(g)) return;
     S.data = q;
     const cols = [["booked", "Booked"], ["waiting", "Waiting"], ["with_doctor", "With doctor"], ["done", "Done"]];
@@ -334,6 +335,8 @@ async function viewQueue(doctorId) {
         ${s ? s.sessions.filter(x => q.columns.booked.some(v => v.session_start === x.key)).map(x => `<button class="btn" data-a="end-session" data-v="${doctorId}" data-s="${x.key}">End ${s.sessions.length > 1 ? x.label.toLowerCase() + " " : ""}session</button>`).join("") : ""}</div>
       <div class="board">${cols.map(([k, l]) => `<section class="col"><header>${pill(k).replace(STATUS[k], l)}<span class="muted num">${q.columns[k].length}</span></header>
         ${q.columns[k].map((v, i, l) => qCard(v, i, l)).join("")}</section>`).join("")}</div>
+      ${wl.items.length ? `<section class="panel"><span class="label">Waitlist</span><div class="rows">${wl.items.map((w, i) => `<div class="r wl-row"><span class="num muted">${i + 1}</span><span class="who"><b>${esc(w.patient_name)}</b></span><span class="muted">${esc(w.phone || w.uhid)}</span>
+          <span class="actions" style="gap:6px"><button class="btn small dark" data-a="wl-book" data-v="${w.id}" ${wl.open ? "" : "disabled"}>Book</button><button class="btn small icon-btn" data-a="wl-del" data-v="${w.id}" aria-label="Remove">×</button></span></div>`).join("")}</div></section>` : ""}
       ${q.not_seen.length ? `<section class="panel"><span class="label">Not seen</span><div class="rows">${q.not_seen.map(v => `<div class="r q" style="grid-template-columns:minmax(0,1fr) auto"><span>${esc(v.patient_name)}</span>${pill(v.status)}</div>`).join("")}</div></section>` : ""}`);
   };
   await run(load);
@@ -342,7 +345,7 @@ async function viewQueue(doctorId) {
 function qCard(v, i, list) {
   const tok = v.token_label ? `<span class="tok chip">${v.token_label}</span>` : `<span class="tok none">No token yet</span>`;
   const clip = `<button class="btn small" data-a="upload" data-v="${v.id}" aria-label="Add document">📎${v.doc_count ? " " + v.doc_count : ""}</button>`;
-  const sess = v.session_label ? `<span class="pill s-soft">${v.session_label}</span>` : "";
+  const sess = (v.session_label ? `<span class="pill s-soft">${v.session_label}</span>` : "") + (v.follow_up_of ? `<span class="pill s-with_doctor">Follow-up</span>` : "");
   const paid = v.paid_at ? `<span class="pill s-paid">${v.amount_paid ? `${rupees(v.amount_paid)} · ${(v.payment_method || "").toUpperCase()}` : "Waived"}</span>` : "";
   const refunded = v.refund_amount && v.paid_at ? `<span class="pill s-no_show">Refunded ${rupees(v.refund_amount)}</span>` : "";
   const more = v.paid_at || (v.status === "waiting" && !v.is_walk_in) ? `<button class="btn small icon-btn" data-a="v-more" data-v="${v.id}" aria-label="More">⋯</button>` : "";
@@ -409,6 +412,7 @@ function renderBooking() {
     ${slot}
     ${extra}
     <div class="foot"><button class="btn" data-a="close">Close</button>
+      ${p && !a.available && b.mode === "book" && /full/i.test(a.reason || "") ? `<button class="btn" data-a="bk-wait">Waitlist</button>` : ""}
       <button class="btn primary" data-a="bk-confirm" ${p && a.available ? "" : "disabled"}>${b.mode === "walk" ? "Paid" : b.mode === "resched" ? "Move booking" : "Confirm"}</button></div></div>`);
   const q = $("#bk-q"); if (q) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); }
 }
@@ -640,7 +644,7 @@ function center() {
   return `<div class="cx-card">
     <div class="cx-head"><div><h1>${esc(v.patient_name)}${v.age != null ? ", " + v.age : ""}</h1>
 </div>
-      <span class="cx-status st-${v.status}"><i></i>${stateLabel}</span></div>
+      <span class="cx-top-right">${["with_doctor", "done"].includes(v.status) ? `<button class="cx-pill-btn" data-a="fu-open" data-v="${v.id}">Follow-up</button>` : ""}<span class="cx-status st-${v.status}"><i></i>${stateLabel}</span></span></div>
     <div class="cx-tabs">${CTABS.map(([k, l]) => `<button data-a="cs-tab" data-v="${k}" aria-pressed="${S.ctab === k}">${l}</button>`).join("")}</div>
     <div class="cx-pane">${({ brief: paneBrief, dictate: paneDictate, note: paneNote })[S.ctab](v)}</div>
   </div>`;
@@ -765,6 +769,13 @@ function profile(p) {
       ${v.note?.soap?.A ? `<div class="muted" style="font-size:13.5px;margin-top:6px">${esc(v.note.soap.A)}</div>` : ""}</div>`).join("")}</div>` : `<div class="empty">—</div>`}
   </section>`;
 }
+function renderFollowUp() {
+  const opts = [[3, "3 days"], [7, "1 week"], [14, "2 weeks"], [30, "1 month"]];
+  modal(`<h2>Follow-up</h2>
+    <div class="seg">${opts.map(([n, l]) => `<button data-a="fu-pick" data-v="${n}" aria-pressed="${addDays(TODAY, n) === M.date}">${l}</button>`).join("")}</div>
+    <label class="field">Date<input type="date" id="fu-date" min="${addDays(TODAY, 1)}" value="${M.date}"></label>
+    <div class="foot"><button class="btn" data-a="close">Back</button><button class="btn primary" data-a="fu-go">Book</button></div>`);
+}
 function renderMerge() {
   const m = M;
   modal(`<h2>Merge into this patient</h2>
@@ -844,6 +855,14 @@ document.addEventListener("click", e => {
       case "pick-token": M.token = Number(v); renderBooking(); break;
       case "bk-pay": M.pay = v; renderBooking(); break;
       case "bk-confirm": await confirmBooking(); break;
+      case "bk-wait": { await api("/waitlist", { body: { patient_id: M.patient.id, doctor_id: M.doctorId, date: M.date, session: M.session } });
+        M.done = `<h2>Added to waitlist</h2><div class="result">${esc(M.patient.name)} · ${niceDate(M.date)}</div><div class="foot"><button class="btn primary" data-a="close-refresh">Done</button></div>`; renderBooking(); break; }
+      case "wl-book": { const r = await api(`/waitlist/${v}/book`, { body: {} }); toast(`Booked · ${r.token_label || r.patient_name}`); refresh(); break; }
+      case "wl-del": await api(`/waitlist/${v}`, { method: "DELETE" }); refresh(); break;
+      case "fu-open": M = { kind: "followup", id: Number(v), date: addDays(TODAY, 7) }; renderFollowUp(); break;
+      case "fu-pick": M.date = addDays(TODAY, Number(v)); renderFollowUp(); break;
+      case "fu-go": { const d = $("#fu-date").value || M.date; const r = await api(`/visits/${M.id}/follow-up`, { body: { date: d } });
+        M = { kind: "done" }; modal(`<h2>${r.waitlisted ? "Day is full" : "Follow-up booked"}</h2><div class="result">${niceDate(d)}${r.waitlisted ? " · added to waitlist" : r.token_label ? ` · token ${r.token_label}` : ""}</div><div class="foot"><button class="btn primary" data-a="close">Done</button></div>`); break; }
       case "register": openRegister(v); break;
       case "rg-use": { const p = M.same.find(x => x.id === Number(v));
         if (M.back) { const back = M.back; M = back; M.patient = p; renderBooking(); } else { closeModal(); location.hash.startsWith("#/consult") ? go(`#/consult?doctor=${S.data.doctorId}&patient=${p.id}`) : go(`#/patients/${p.id}`); }

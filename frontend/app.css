@@ -811,3 +811,5 @@ table.members tr.click:hover td:first-child b { text-decoration-color: var(--ink
 .r { padding: 10px 0; }
 .panel > .label { padding-bottom: 2px; }
 .board .card .acts { padding-top: 4px; }
+.cx-top-right { display: flex; align-items: center; gap: 10px; }
+.wl-row { grid-template-columns: 40px minmax(0, 1fr) minmax(0, 1fr) auto !important; }

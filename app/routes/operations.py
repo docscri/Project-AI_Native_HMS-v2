@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from ..auth import current_member, member_for_token, public_member, require_screen
 from ..db import get_db, log_event, now, row, rows
-from ..rules import (ACTIVE, day_schedule, doctor_fee, find_session, next_arrival_token, now_hhmm, require_bookable,
+from ..rules import (ACTIVE, availability, day_schedule, doctor_fee, find_session, next_arrival_token, now_hhmm, require_bookable,
                      token_time)
 from .clinic import clinic_of
 
@@ -214,14 +214,21 @@ def book(body: Booking, me=Depends(front_desk), db=Depends(get_db)):
     db.lock(f"tokens:{body.doctor_id}:{body.date}")
     if body.date < Date.today().isoformat():
         raise HTTPException(422, "Pick today or a later date.")
+    return create_booking(db, me, body.patient_id, body.doctor_id, body.date, body.session, body.token)
+
+
+def create_booking(db, me, patient_id, doctor_id, day, session=None, wanted=None, follow_up_of=None) -> dict:
+    """Book a patient. Callers hold the token lock for this doctor and day."""
     clinic = clinic_of(db, me)
-    check_patient_free(db, me, body.patient_id, body.doctor_id, body.date)
-    avail = require_bookable(db, clinic, body.doctor_id, body.date, session=body.session)
-    token = pick_token(avail, body.token)
+    check_patient_free(db, me, patient_id, doctor_id, day)
+    avail = require_bookable(db, clinic, doctor_id, day, session=session)
+    token = pick_token(avail, wanted)
     vid = db.execute(
-        "insert into visits (clinic_id, patient_id, doctor_id, date, session_start, token, status, fee) values (?, ?, ?, ?, ?, ?, 'booked', ?)",
-        (me["clinic_id"], body.patient_id, body.doctor_id, body.date, avail["session"], token, avail["fee"])).lastrowid
-    log_event(db, me["clinic_id"], me["id"], "visit", vid, "booked", {"token": token, "session": avail["session"]})
+        "insert into visits (clinic_id, patient_id, doctor_id, date, session_start, token, status, fee, follow_up_of) values (?, ?, ?, ?, ?, ?, 'booked', ?, ?)",
+        (me["clinic_id"], patient_id, doctor_id, day, avail["session"], token, avail["fee"], follow_up_of)).lastrowid
+    log_event(db, me["clinic_id"], me["id"], "visit", vid, "booked", {"token": token, "session": avail["session"], "follow_up_of": follow_up_of})
+    db.execute("update waitlist set status = 'booked', visit_id = ? where patient_id = ? and doctor_id = ? and date = ? and status = 'waiting'",
+               (vid, patient_id, doctor_id, day))
     v = visit_out(db, me, vid)
     s = avail["schedule"]
     v["tell_patient"] = (f"Token {v['token_label']}, come {'at' if s['exact_time'] else 'around'} {v['expected_time']}."
@@ -425,3 +432,56 @@ def list_doctors(me=Depends(current_member), db=Depends(get_db)):
     ds = rows(db.execute("select id, name, speciality, fee_override, status from members where clinic_id = ? and kind = 'doctor' and status != 'inactive' order by id",
                          (me["clinic_id"],)))
     return [d | {"letter": letters[d["id"]]} for d in ds]
+
+
+# ---------- waitlist ----------
+
+class WaitIn(BaseModel):
+    patient_id: int
+    doctor_id: int
+    date: str
+    session: str | None = None
+
+
+def add_to_waitlist(db, me, patient_id, doctor_id, day, session=None) -> dict:
+    check_patient_free(db, me, patient_id, doctor_id, day)
+    if db.execute("select 1 from waitlist where patient_id = ? and doctor_id = ? and date = ? and status = 'waiting'",
+                  (patient_id, doctor_id, day)).fetchone():
+        raise HTTPException(409, "Already on the waitlist.")
+    wid = db.execute("insert into waitlist (clinic_id, patient_id, doctor_id, date, session_start, added_by, created_at) values (?, ?, ?, ?, ?, ?, ?)",
+                     (me["clinic_id"], patient_id, doctor_id, day, session, me["id"], now())).lastrowid
+    log_event(db, me["clinic_id"], me["id"], "visit", None, "waitlisted", {"patient_id": patient_id, "date": day})
+    return {"id": wid, "waitlisted": True, "date": day}
+
+
+@router.post("/waitlist")
+def join_waitlist(body: WaitIn, me=Depends(front_desk), db=Depends(get_db)):
+    if body.date < Date.today().isoformat():
+        raise HTTPException(422, "Pick today or a later date.")
+    return add_to_waitlist(db, me, body.patient_id, body.doctor_id, body.date, body.session)
+
+
+@router.get("/waitlist")
+def waitlist(doctor_id: int, date: str, me=Depends(front_desk), db=Depends(get_db)):
+    """Who is waiting for a place, oldest first, and whether a place is open now."""
+    items = rows(db.execute(
+        """select w.*, p.name as patient_name, p.uhid, p.phone from waitlist w join patients p on p.id = w.patient_id
+           where w.clinic_id = ? and w.doctor_id = ? and w.date = ? and w.status = 'waiting' order by w.id""",
+        (me["clinic_id"], doctor_id, date)))
+    a = availability(db, clinic_of(db, me), doctor_id, date) if items else {"available": False}
+    return {"items": items, "open": bool(a.get("available"))}
+
+
+@router.post("/waitlist/{wait_id}/book")
+def book_from_waitlist(wait_id: int, me=Depends(front_desk), db=Depends(get_db)):
+    w = row(db.execute("select * from waitlist where id = ? and clinic_id = ? and status = 'waiting'", (wait_id, me["clinic_id"])).fetchone())
+    if not w:
+        raise HTTPException(404, "Not on the waitlist.")
+    db.lock(f"tokens:{w['doctor_id']}:{w['date']}")
+    return create_booking(db, me, w["patient_id"], w["doctor_id"], w["date"], w["session_start"])
+
+
+@router.delete("/waitlist/{wait_id}")
+def leave_waitlist(wait_id: int, me=Depends(front_desk), db=Depends(get_db)):
+    db.execute("update waitlist set status = 'removed' where id = ? and clinic_id = ?", (wait_id, me["clinic_id"]))
+    return {"ok": True}

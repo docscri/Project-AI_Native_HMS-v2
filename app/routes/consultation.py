@@ -233,6 +233,27 @@ def blank_note(visit_id: int, me=Depends(doctor_screen), db=Depends(get_db)):
     return load_note(db, visit_id)
 
 
+class FollowUp(BaseModel):
+    date: str
+
+
+@router.post("/visits/{visit_id}/follow-up")
+def follow_up(visit_id: int, body: FollowUp, me=Depends(doctor_screen), db=Depends(get_db)):
+    """Book the same patient with the same doctor on a later day. If that day is full, they join the waitlist."""
+    from .operations import add_to_waitlist, create_booking
+    v = get_visit(db, me, visit_id)
+    if body.date <= Date.today().isoformat() or body.date <= v["date"]:
+        raise HTTPException(422, "Pick a later date.")
+    db.lock(f"tokens:{v['doctor_id']}:{body.date}")
+    try:
+        out = create_booking(db, me, v["patient_id"], v["doctor_id"], body.date, follow_up_of=visit_id)
+        return out | {"waitlisted": False}
+    except HTTPException as e:
+        if e.status_code != 409 or e.detail not in ("Session full.", "Session ended."):
+            raise
+        return add_to_waitlist(db, me, v["patient_id"], v["doctor_id"], body.date)
+
+
 @router.put("/notes/{note_id}")
 def edit_note(note_id: int, body: NoteEdit, me=Depends(doctor_screen), db=Depends(get_db)):
     n = row(db.execute("select * from notes where id = ? and clinic_id = ?", (note_id, me["clinic_id"])).fetchone())

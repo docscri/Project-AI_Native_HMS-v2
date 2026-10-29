@@ -81,3 +81,28 @@ def test_undo_arrival_queue_order_and_late():
         late = c.post(f"/api/visits/{ids[1]}/late", headers=h).json()
         assert late["late"] is True
         assert c.post(f"/api/visits/{ids[0]}/late", headers=h).status_code == 409
+
+
+def test_waitlist_and_follow_up():
+    with TestClient(app) as c:
+        h = {"Authorization": "Bearer " + c.post("/api/onboarding/owner", json={"name": "Dr. W", "email": "wait@x.in", "password": "clinic123", "is_doctor": True}).json()["token"]}
+        c.put("/api/clinic/rules", headers=h, json={"fee": 100, "days": [0, 1, 2, 3, 4, 5, 6], "limit_by": "patients", "limit_value": 1,
+                                                    "token_timing": "booking", "sessions": [{"start": "00:00", "end": "23:59"}]})
+        doc = c.get("/api/me", headers=h).json()["member"]["id"]
+        a, b = (patient(c, h, n) for n in ("WA", "WB"))
+        first = c.post("/api/visits", headers=h, json={"patient_id": a, "doctor_id": doc, "date": TOMORROW}).json()
+        assert c.post("/api/visits", headers=h, json={"patient_id": b, "doctor_id": doc, "date": TOMORROW}).status_code == 409
+        w = c.post("/api/waitlist", headers=h, json={"patient_id": b, "doctor_id": doc, "date": TOMORROW}).json()
+        lst = c.get("/api/waitlist", headers=h, params={"doctor_id": doc, "date": TOMORROW}).json()
+        assert [x["patient_name"] for x in lst["items"]] == ["WB"] and lst["open"] is False
+        c.post(f"/api/visits/{first['id']}/cancel", headers=h, json={"reason": "Patient asked"})
+        assert c.get("/api/waitlist", headers=h, params={"doctor_id": doc, "date": TOMORROW}).json()["open"] is True
+        assert c.post(f"/api/waitlist/{w['id']}/book", headers=h).json()["token"] == 1
+        assert c.get("/api/waitlist", headers=h, params={"doctor_id": doc, "date": TOMORROW}).json()["items"] == []
+        # follow-up: books when there is room, waitlists when the day is full
+        v = c.post("/api/visits/walk-in", headers=h, json={"patient_id": a, "doctor_id": doc, "payment_method": "cash"}).json()
+        later = (date.today() + timedelta(days=2)).isoformat()
+        f = c.post(f"/api/visits/{v['id']}/follow-up", headers=h, json={"date": later}).json()
+        assert f["waitlisted"] is False and f["follow_up_of"] == v["id"]
+        f2 = c.post(f"/api/visits/{v['id']}/follow-up", headers=h, json={"date": TOMORROW}).json()
+        assert f2["waitlisted"] is True
