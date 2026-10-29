@@ -17,6 +17,7 @@ class PatientIn(BaseModel):
     dob: str | None = None
     sex: str | None = None
     phone: str = ""
+    address: str = ""
 
 
 class PatientEdit(BaseModel):
@@ -24,6 +25,7 @@ class PatientEdit(BaseModel):
     dob: str | None = None
     sex: str | None = None
     phone: str | None = None
+    address: str | None = None
 
 
 def clean(body) -> dict:
@@ -46,6 +48,10 @@ def clean(body) -> dict:
             raise HTTPException(422, "Check the date of birth: age is over 120.")
     elif "dob" in out:
         out["dob"] = None
+    if "address" in out:
+        out["address"] = " ".join(out["address"].split())
+        if len(out["address"]) > 200:
+            raise HTTPException(422, "Address is too long.")
     if out.get("sex") and out["sex"] not in ("M", "F", "O"):
         raise HTTPException(422, "Pick male, female or other.")
     return out
@@ -80,8 +86,8 @@ def register(body: PatientIn, me=Depends(current_member), db=Depends(get_db)):
     c = row(db.execute("select uhid_prefix, next_uhid from clinics where id = ?", (me["clinic_id"],)).fetchone())
     uhid = f'{c["uhid_prefix"]}-{c["next_uhid"]:04d}'
     db.execute("update clinics set next_uhid = next_uhid + 1 where id = ?", (me["clinic_id"],))
-    pid = db.execute("insert into patients (clinic_id, uhid, name, dob, sex, phone) values (?, ?, ?, ?, ?, ?)",
-                     (me["clinic_id"], uhid, data["name"], data.get("dob"), data.get("sex"), data.get("phone", ""))).lastrowid
+    pid = db.execute("insert into patients (clinic_id, uhid, name, dob, sex, phone, address) values (?, ?, ?, ?, ?, ?, ?)",
+                     (me["clinic_id"], uhid, data["name"], data.get("dob"), data.get("sex"), data.get("phone", ""), data.get("address", ""))).lastrowid
     log_event(db, me["clinic_id"], me["id"], "patient", pid, "registered")
     return get_patient(db, me, pid) | {"similar": similar(db, me["clinic_id"], data["name"], data.get("phone", ""), data.get("dob"), pid)}
 
@@ -144,7 +150,7 @@ def merge(patient_id: int, body: Merge, me=Depends(require_screen("patients")), 
         raise HTTPException(409, "Both records have a visit with the same doctor on the same day. Cancel one first.")
     for table in ("visits", "notes", "documents"):
         db.execute(f"update {table} set patient_id = ? where patient_id = ?", (keep["id"], other["id"]))
-    fill = {k: other[k] for k in ("dob", "sex", "phone") if not keep[k] and other[k]}
+    fill = {k: other[k] for k in ("dob", "sex", "phone", "address") if not keep[k] and other[k]}
     if fill:
         db.execute(f"update patients set {', '.join(f'{k} = ?' for k in fill)} where id = ?", (*fill.values(), keep["id"]))
     db.execute("delete from patients where id = ?", (other["id"],))

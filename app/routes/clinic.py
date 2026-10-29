@@ -172,6 +172,32 @@ def create_owner(body: Owner, db=Depends(get_db)):
     return {"token": create_session(db, mid)}
 
 
+class OwnerEdit(BaseModel):
+    name: str = Field(min_length=1)
+    email: str
+    phone: str = ""
+    password: str = ""            # empty = keep the current one
+    is_doctor: bool = True
+
+
+@router.put("/onboarding/owner")
+def edit_owner(body: OwnerEdit, me=Depends(current_member), db=Depends(get_db)):
+    """Back to step 1 during setup: the owner can still change everything they entered."""
+    if not me["is_owner"] or clinic_of(db, me)["onboarded"]:
+        raise HTTPException(403, "Change these in your account settings.")
+    email = clean_email(body.email)
+    if db.execute("select 1 from members where lower(email) = lower(?) and id != ?", (email, me["id"])).fetchone():
+        raise HTTPException(409, "An account with this email already exists.")
+    db.execute("update members set name = ?, email = ?, phone = ?, kind = ?, speciality = ? where id = ?",
+               (body.name.strip(), email, clean_phone(body.phone), "doctor" if body.is_doctor else "staff",
+                (me.get("speciality") or "General medicine") if body.is_doctor else None, me["id"]))
+    if body.password:
+        validate_password(body.password)
+        db.execute("update members set password_hash = ? where id = ?", (hash_password(body.password), me["id"]))
+    log_event(db, me["clinic_id"], me["id"], "member", me["id"], "updated")
+    return public_member(row(db.execute("select * from members where id = ?", (me["id"],)).fetchone()))
+
+
 class Details(BaseModel):
     name: str = Field(min_length=1)
     phone: str = ""

@@ -133,7 +133,7 @@ function authPage(inner, cls = "") {
   $("#root").innerHTML = `<main class="login-screen ${cls}"><div class="login-brand">Dictate</div>${wave()}<section class="login-stage">${inner}</section></main>`;
 }
 function viewLogin() {
-  authPage(`<div class="login-card"><form id="login" class="login-fields" novalidate>
+  authPage(`<div class="login-card login-home"><form id="login" class="login-fields" novalidate>
       <input class="login-input" id="lg-email" type="email" placeholder="Email" aria-label="Email" autocomplete="username">
       <div class="login-pw"><input class="login-input" id="lg-pw" type="password" placeholder="Password" aria-label="Password" autocomplete="current-password">
         <button class="login-submit glow" type="submit" aria-label="Sign in">${arrowRight}</button></div>
@@ -159,9 +159,9 @@ function viewOnboarding(step) {
   const me = S.me || {};
   if (step === 1) obFrame(1, `<h1>Create your account</h1>
     <label class="field">Name<input id="ob-name" value="${esc(me.name || "")}"></label>
-    <div class="grid2"><label class="field">Email<input id="ob-email" type="email" value="${esc(me.email || "")}" ${S.me ? "disabled" : ""}></label><label class="field">Phone<input id="ob-phone" value="${esc(me.phone || "")}"></label></div>
-    ${S.me ? "" : `<label class="field">Password · 8+ letters &amp; numbers<input id="ob-pw" type="password" autocomplete="new-password"></label>`}
-    <label class="choice"><input type="checkbox" id="ob-doc" ${me.kind === "staff" ? "" : "checked"} ${S.me ? "disabled" : ""}><span><b>I am also a doctor here</b></span></label>`);
+    <div class="grid2"><label class="field">Email<input id="ob-email" type="email" value="${esc(me.email || "")}"></label><label class="field">Phone<input id="ob-phone" value="${esc(me.phone || "")}"></label></div>
+    <label class="field">Password<input id="ob-pw" type="password" autocomplete="new-password"></label>
+    <label class="choice"><input type="checkbox" id="ob-doc" ${me.kind === "staff" ? "" : "checked"}><span><b>I am also a doctor here</b></span></label>`);
   if (step === 2) obFrame(2, `<h1>Your clinic</h1>
     <label class="field">Clinic name<input id="ob-cname" value="${esc(S.clinic.name)}"></label>
     <label class="field">Phone<input id="ob-cphone" value="${esc(S.clinic.phone)}"></label>
@@ -178,7 +178,7 @@ async function loadMembersStep() {
 const inviteLink = m => m.status === "invited" ? `<button class="btn small" data-a="renew-invite" data-v="${m.id}">Copy invite link</button>` : `<span class="pill s-paid">Active</span>`;
 
 async function obNext(step) {
-  if (step === 1 && S.me) { await api(`/members/${S.me.id}`, { method: "PATCH", body: { name: $("#ob-name").value, phone: $("#ob-phone").value } }); S.me = (await api("/me")).member; return viewOnboarding(2); }
+  if (step === 1 && S.me) { S.me = await api("/onboarding/owner", { method: "PUT", body: { name: $("#ob-name").value, email: $("#ob-email").value, phone: $("#ob-phone").value, password: $("#ob-pw").value, is_doctor: $("#ob-doc").checked } }); S.doctors = await api("/doctors"); return viewOnboarding(2); }
   if (step === 1) {
     const r = await api("/onboarding/owner", { body: { name: $("#ob-name").value, email: $("#ob-email").value, phone: $("#ob-phone").value, password: $("#ob-pw").value, is_doctor: $("#ob-doc").checked } });
     setToken(r.token); const me = await api("/me"); S.me = me.member; S.clinic = me.clinic; return viewOnboarding(2);
@@ -470,6 +470,7 @@ function openRegister(name) {
   modal(`<h2>New patient</h2>
     <div class="grid2"><label class="field">Name<input id="rg-name" value="${esc(name || "")}"></label><label class="field">Phone<input id="rg-phone" placeholder="98470 12345"></label></div>
     <div class="grid2"><label class="field">Date of birth<input id="rg-dob" type="date" max="${TODAY}"></label><label class="field">Sex<select id="rg-sex"><option value="M">Male</option><option value="F">Female</option><option value="O">Other</option></select></label></div>
+    <label class="field">Address<input id="rg-addr"></label>
     <div class="foot"><button class="btn" data-a="${back ? "rg-back" : "close"}">${back ? "Back" : "Cancel"}</button><button class="btn primary" data-a="rg-save">Register</button></div>`);
   setTimeout(() => $("#rg-name")?.focus(), 30);
 }
@@ -685,7 +686,7 @@ function rightCol() {
   if (S.cside === "citations") return `${tabs}${citations(D.cur)}`;
   if (!p) return `${tabs}<div class="cx-empty">—</div>`;
   return `${tabs}<div class="cx-rows">
-    ${[["Name", p.name], ["Age", ageOf(p.dob)], ["Date of birth", p.dob ? longDate(p.dob) : "—"], ["Sex", { M: "Male", F: "Female", O: "Other" }[p.sex] || "—"], ["Phone", p.phone], ["UHID", p.uhid]].map(([k, val]) => `<div class="cx-row"><span>${k}</span><b>${esc(val)}</b></div>`).join("")}
+    ${[["Name", p.name], ["Age", ageOf(p.dob)], ["Date of birth", p.dob ? longDate(p.dob) : "—"], ["Sex", { M: "Male", F: "Female", O: "Other" }[p.sex] || "—"], ["Phone", p.phone || "—"], ["Address", p.address || "—"], ["UHID", p.uhid]].map(([k, val]) => `<div class="cx-row"><span>${k}</span><b>${esc(val)}</b></div>`).join("")}
     <div class="cx-row"><span>Visits</span><b>${p.visits.filter(x => x.status === "done").length}</b></div></div>`;
 }
 function sourceOf(v, id) {
@@ -758,7 +759,7 @@ async function viewPatients(id) {
 function profile(p) {
   const visits = p.visits.filter(v => ["done", "with_doctor", "waiting", "booked"].includes(v.status));
   return `<section class="panel" style="gap:14px"><div class="actions" style="justify-content:space-between;align-items:flex-start"><div><h2>${esc(p.name)}</h2>
-      <div class="muted">${ageOf(p.dob)} ${esc(p.sex || "")} · <span class="mono">${esc(p.uhid)}</span> · ${esc(p.phone)}</div></div><span class="actions" style="gap:6px"><button class="btn small" data-a="pt-edit" data-v="${p.id}">Edit</button><button class="btn small" data-a="pt-merge" data-v="${p.id}">Merge</button></span></div>
+      <div class="muted">${ageOf(p.dob)} ${esc(p.sex || "")} · <span class="mono">${esc(p.uhid)}</span> · ${esc(p.phone)}</div>${p.address ? `<div class="muted">${esc(p.address)}</div>` : ""}</div><span class="actions" style="gap:6px"><button class="btn small" data-a="pt-edit" data-v="${p.id}">Edit</button><button class="btn small" data-a="pt-merge" data-v="${p.id}">Merge</button></span></div>
     <span class="label">Visit history</span>
     ${visits.length ? `<div class="timeline">${visits.map(v => `<div class="tl"><div class="tl-head"><b>${longDate(v.date)}</b><span>${esc(v.doctor)}</span>${pill(v.status)}</div>
       <div class="items">${v.note ? `<button class="btn small" data-a="print" data-v="${v.note.id}">${v.note.status === "signed" ? "Note & prescription" : "Draft note"}</button>` : ""}
@@ -779,6 +780,7 @@ function openPatientEdit(p) {
   M = { kind: "pedit", id: p.id };
   modal(`<h2>Edit patient</h2><div class="grid2"><label class="field">Name<input id="pe-name" value="${esc(p.name)}"></label><label class="field">Phone<input id="pe-phone" value="${esc(p.phone)}"></label></div>
     <div class="grid2"><label class="field">Date of birth<input id="pe-dob" type="date" value="${esc(p.dob || "")}"></label><label class="field">Sex<select id="pe-sex">${["M", "F", "O"].map(s => `<option ${p.sex === s ? "selected" : ""}>${s}</option>`).join("")}</select></label></div>
+    <label class="field">Address<input id="pe-addr" value="${esc(p.address || "")}"></label>
     <div class="foot"><button class="btn" data-a="close">Cancel</button><button class="btn primary" data-a="pe-save">Save</button></div>`);
 }
 
@@ -873,14 +875,14 @@ document.addEventListener("click", e => {
       case "rg-use": { const p = M.same.find(x => x.id === Number(v));
         if (M.back) { const back = M.back; M = back; M.patient = p; renderBooking(); } else { closeModal(); location.hash.startsWith("#/consult") ? go(`#/consult?doctor=${S.data.doctorId}&patient=${p.id}`) : go(`#/patients/${p.id}`); }
         break; }
-      case "rg-again": { const f = M.form, back = M.back; openRegister(f.name); M.back = back; $("#rg-phone").value = f.phone; $("#rg-dob").value = f.dob || ""; $("#rg-sex").value = f.sex; break; }
+      case "rg-again": { const f = M.form, back = M.back; openRegister(f.name); M.back = back; $("#rg-phone").value = f.phone; $("#rg-dob").value = f.dob || ""; $("#rg-sex").value = f.sex; $("#rg-addr").value = f.address || ""; break; }
       case "pt-merge": M = { kind: "merge", id: Number(v), q: "", results: [] }; renderMerge(); break;
       case "mg-clear": M.other = null; renderMerge(); break;
       case "mg-pick": M.other = M.results.find(x => x.id === Number(v)); renderMerge(); break;
       case "mg-go": { const p = await api(`/patients/${M.id}/merge`, { body: { other_id: M.other.id } }); closeModal(); toast(`Merged into ${p.uhid}`); go(`#/patients/${p.id}`); route(); break; }
       case "rg-back": { const back = M.back; M = back; renderBooking(); break; }
       case "rg-save": case "rg-new": {
-        const f = a === "rg-new" ? M.form : { name: $("#rg-name").value, phone: $("#rg-phone").value, dob: $("#rg-dob").value || null, sex: $("#rg-sex").value };
+        const f = a === "rg-new" ? M.form : { name: $("#rg-name").value, phone: $("#rg-phone").value, dob: $("#rg-dob").value || null, sex: $("#rg-sex").value, address: $("#rg-addr").value };
         if (a === "rg-save") {
           const same = await api(`/patients/check?name=${encodeURIComponent(f.name)}&phone=${encodeURIComponent(f.phone)}&dob=${f.dob || ""}`);
           if (same.length) {
@@ -948,7 +950,7 @@ document.addEventListener("click", e => {
       case "ad-rules": S.clinic = await api("/clinic/rules", { method: "PUT", body: readRules("ad") }); toast("Rules saved. Booking now follows them."); route(); break;
       case "pt-open": go(`#/patients/${v}`); break;
       case "pt-edit": openPatientEdit(await api(`/patients/${v}`)); break;
-      case "pe-save": await api(`/patients/${M.id}`, { method: "PATCH", body: { name: $("#pe-name").value, phone: $("#pe-phone").value, dob: $("#pe-dob").value || null, sex: $("#pe-sex").value } }); closeModal(); toast("Saved"); route(); break;
+      case "pe-save": await api(`/patients/${M.id}`, { method: "PATCH", body: { name: $("#pe-name").value, phone: $("#pe-phone").value, dob: $("#pe-dob").value || null, sex: $("#pe-sex").value, address: $("#pe-addr").value } }); closeModal(); toast("Saved"); route(); break;
       case "cs-tab": if (D.cur?.note && $("#soap-S")) D.cur.note.content = readNote(); S.ctab = v; renderConsult(); break;
       case "cs-side": S.cside = v; renderConsult(); break;
       case "cs-left": S.cleft = v; refreshConsult(); break;

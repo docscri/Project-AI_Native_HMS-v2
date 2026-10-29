@@ -48,3 +48,16 @@ def test_hand_written_note_and_activity():
         acts = c.get("/api/activity", headers=h).json()["events"]
         assert acts[0]["action"] == "signed" and acts[0]["subject"] == "Note Patient" and acts[0]["actor"] == "Dr. P"
         assert all(e["entity"] == "visit" for e in c.get("/api/activity", headers=h, params={"kind": "visits"}).json()["events"])
+
+
+def test_address_and_owner_edit_during_setup():
+    with TestClient(app) as c:
+        h, doc = owner(c, "addr@x.in")
+        p = c.post("/api/patients", headers=h, json={"name": "Addr", "address": " 12  MG Road,  Kochi "}).json()
+        assert p["address"] == "12 MG Road, Kochi"
+        assert c.patch(f"/api/patients/{p['id']}", headers=h, json={"address": "Calicut"}).json()["address"] == "Calicut"
+        m = c.put("/api/onboarding/owner", headers=h, json={"name": "Dr. Q", "email": "new@x.in", "password": "newpass123", "is_doctor": False}).json()
+        assert m["email"] == "new@x.in" and m["kind"] == "staff"
+        assert c.post("/api/auth/login", json={"email": "new@x.in", "password": "newpass123"}).status_code == 200
+        c.post("/api/onboarding/finish", headers=h)
+        assert c.put("/api/onboarding/owner", headers=h, json={"name": "X", "email": "new@x.in"}).status_code == 403
