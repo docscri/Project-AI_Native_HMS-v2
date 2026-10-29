@@ -409,7 +409,7 @@ function renderBooking() {
     ${slot}
     ${extra}
     <div class="foot"><button class="btn" data-a="close">Close</button>
-      <button class="btn primary" data-a="bk-confirm" ${p && a.available ? "" : "disabled"}>${b.mode === "walk" ? "Paid" : b.mode === "resched" ? "Move booking" : "Confirm booking"}</button></div></div>`);
+      <button class="btn primary" data-a="bk-confirm" ${p && a.available ? "" : "disabled"}>${b.mode === "walk" ? "Paid" : b.mode === "resched" ? "Move booking" : "Confirm"}</button></div></div>`);
   const q = $("#bk-q"); if (q) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); }
 }
 async function confirmBooking() {
