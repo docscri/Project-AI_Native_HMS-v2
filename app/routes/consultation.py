@@ -77,7 +77,7 @@ def call_next(doctor_id: int | None = None, me=Depends(doctor_screen), db=Depend
                   (did, Date.today().isoformat())).fetchone():
         raise HTTPException(409, "Finish the current patient first.")
     v = row(db.execute(
-        "select * from visits where doctor_id = ? and date = ? and status = 'waiting' order by token limit 1",
+        "select * from visits where doctor_id = ? and date = ? and status = 'waiting' order by session_start, queue_order, token limit 1",
         (did, Date.today().isoformat())).fetchone())
     if not v:
         raise HTTPException(404, "No one is waiting.")

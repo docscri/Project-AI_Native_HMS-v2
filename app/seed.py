@@ -58,12 +58,18 @@ def seed() -> bool:
 
     ts = now()
 
+    receipt = [0]
+
     def visit(p, doc, token, status, day=today, method=None):
         paid = ts if status in ("waiting", "with_doctor", "done") else None
+        fee = 400 if doc == rahul else 300
+        if paid:
+            receipt[0] += 1
         return db.execute(
-            """insert into visits (clinic_id, patient_id, doctor_id, date, token, status, fee, payment_method, paid_at, arrived_at)
-               values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (cid, pid[p], doc, day, token, status, 400 if doc == rahul else 300, method or (paid and "upi"), paid, paid)).lastrowid
+            """insert into visits (clinic_id, patient_id, doctor_id, date, session_start, token, status, fee, payment_method,
+               paid_at, arrived_at, amount_paid, receipt_no, queue_order) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (cid, pid[p], doc, day, start if day == today else "09:00", token, status, fee, method or (paid and "upi"),
+             paid, paid, fee if paid else None, receipt[0] if paid else None, token)).lastrowid
 
     # Suresh's earlier visit with a signed note and a lab report
     old = visit("Suresh Pillai", anjali, 4, "done", day="2026-03-12", method="cash")
@@ -97,6 +103,7 @@ def seed() -> bool:
                    "summary": "Blood report from Sunrise Diagnostics.",
                    "findings": [{"name": "HbA1c", "value": "8.9", "unit": "%"}, {"name": "Fasting glucose", "value": "168", "unit": "mg/dL"},
                                 {"name": "Creatinine", "value": "1.0", "unit": "mg/dL"}]})))
+    db.execute("update clinics set next_receipt = ? where id = ?", (receipt[0] + 1, cid))
     db.commit()
     db.close()
     return True

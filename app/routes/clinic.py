@@ -12,7 +12,7 @@ from ..auth import (INVITE_DAYS, LOCK_MINUTES, MAX_FAILED_LOGINS, RESET_HOURS, S
                     current_member, end_sessions, hash_password, later, new_code, public_member, require_admin, token_hash,
                     validate_password)
 from ..db import get_db, log_event, now, row, rows
-from ..rules import limits
+from ..rules import limits, parse_sessions, validate_sessions
 
 router = APIRouter(prefix="/api")
 
@@ -39,7 +39,8 @@ def public_clinic(c: dict) -> dict:
     c = dict(c)
     c["days"] = json.loads(c["days"])
     c["onboarded"] = bool(c["onboarded"])
-    c["derived"] = limits(c["start"], c["end"], c["limit_by"], c["limit_value"])
+    c["sessions"] = parse_sessions(c.get("sessions"), c["start"], c["end"])
+    c["derived"] = limits(c["sessions"][0]["start"], c["sessions"][0]["end"], c["limit_by"], c["limit_value"]) if c["sessions"] else None
     return c
 
 
@@ -190,26 +191,37 @@ def update_details(body: Details, me=Depends(require_admin), db=Depends(get_db))
     return public_clinic(clinic_of(db, me))
 
 
-class Rules(BaseModel):
-    fee: int = Field(ge=0)
-    days: list[int]
+class SessionTime(BaseModel):
     start: str
     end: str
+
+
+class Rules(BaseModel):
+    fee: int = Field(ge=0, le=100000)
+    days: list[int]
+    sessions: list[SessionTime] = []
+    start: str | None = None    # older single-session form
+    end: str | None = None
     limit_by: str = Field(pattern="^(patients|minutes)$")
-    limit_value: int = Field(ge=1)
+    limit_value: int = Field(ge=1, le=500)
     token_timing: str = Field(pattern="^(booking|arrival)$")
 
 
 @router.put("/clinic/rules")
 def update_rules(body: Rules, me=Depends(require_admin), db=Depends(get_db)):
     """Step 3 and Administration → Clinic rules. Defaults for every doctor."""
-    if body.start >= body.end:
-        raise HTTPException(422, "End time must be after start time.")
+    days = sorted({d for d in body.days if 0 <= d <= 6})
+    if not days:
+        raise HTTPException(422, "Pick at least one working day.")
+    raw = [s.model_dump() for s in body.sessions] or ([{"start": body.start, "end": body.end}] if body.start and body.end else [])
+    sessions = validate_sessions(raw)
+    if body.limit_by == "minutes" and body.limit_value > 240:
+        raise HTTPException(422, "Minutes per patient looks too high.")
     db.execute(
-        """update clinics set fee = ?, days = ?, start = ?, "end" = ?, limit_by = ?, limit_value = ?, token_timing = ?
+        """update clinics set fee = ?, days = ?, start = ?, "end" = ?, sessions = ?, limit_by = ?, limit_value = ?, token_timing = ?
            where id = ?""",
-        (body.fee, json.dumps(sorted(set(body.days))), body.start, body.end, body.limit_by, body.limit_value,
-         body.token_timing, me["clinic_id"]),
+        (body.fee, json.dumps(days), sessions[0]["start"], sessions[-1]["end"], json.dumps(sessions), body.limit_by,
+         body.limit_value, body.token_timing, me["clinic_id"]),
     )
     log_event(db, me["clinic_id"], me["id"], "clinic", me["clinic_id"], "rules_updated", body.model_dump())
     return public_clinic(clinic_of(db, me))

@@ -1,12 +1,14 @@
 """Doctor schedules: clinic hours by default, one-day overrides on top."""
 import calendar
+import json
+from datetime import date as Date, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from ..auth import current_member
 from ..db import get_db, log_event, row
-from ..rules import availability, day_schedule
+from ..rules import availability, day_schedule, validate_sessions
 from .clinic import clinic_of
 
 router = APIRouter(prefix="/api")
@@ -40,31 +42,92 @@ def month(doctor_id: int, month: str, me=Depends(current_member), db=Depends(get
     return days
 
 
+class Session(BaseModel):
+    start: str
+    end: str
+
+
 class Override(BaseModel):
     is_off: bool = False
-    start: str | None = None
+    sessions: list[Session] = []
+    start: str | None = None      # older single-session form
     end: str | None = None
     limit_by: str | None = Field(default=None, pattern="^(patients|minutes)$")
     limit_value: int | None = Field(default=None, ge=1)
+
+
+def save_day(db, me, doctor_id: int, day: str, body: Override) -> None:
+    sessions = None
+    if not body.is_off:
+        raw = [x.model_dump() for x in body.sessions] or ([{"start": body.start, "end": body.end}] if body.start and body.end else [])
+        sessions = validate_sessions(raw)
+        if not (body.limit_by and body.limit_value):
+            raise HTTPException(422, "Set how many patients the doctor sees.")
+    db.execute(
+        """insert into schedule_overrides (clinic_id, doctor_id, date, is_off, start, "end", sessions, limit_by, limit_value)
+           values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+           on conflict (doctor_id, date) do update set is_off = excluded.is_off, start = excluded.start,
+             "end" = excluded."end", sessions = excluded.sessions, limit_by = excluded.limit_by, limit_value = excluded.limit_value""",
+        (me["clinic_id"], doctor_id, day, int(body.is_off), sessions and sessions[0]["start"], sessions and sessions[-1]["end"],
+         json.dumps(sessions) if sessions else None, body.limit_by, body.limit_value),
+    )
+
+
+def bookings_on(db, doctor_ids: list[int], days: list[str]) -> int:
+    if not doctor_ids or not days:
+        return 0
+    return db.execute(
+        f"""select count(*) from visits where status = 'booked' and doctor_id in ({','.join('?' * len(doctor_ids))})
+            and date in ({','.join('?' * len(days))})""", (*doctor_ids, *days)).fetchone()[0]
 
 
 @router.put("/schedules/{doctor_id}/{date}")
 def set_day(doctor_id: int, date: str, body: Override, me=Depends(current_member), db=Depends(get_db)):
     doctor(db, me, doctor_id)
     can_edit(me, doctor_id)
-    if not body.is_off and not (body.start and body.end and body.limit_by and body.limit_value):
-        raise HTTPException(422, "Give start, end and the patient limit, or mark the day off.")
-    if not body.is_off and body.start >= body.end:
-        raise HTTPException(422, "End time must be after start time.")
-    db.execute(
-        """insert into schedule_overrides (clinic_id, doctor_id, date, is_off, start, "end", limit_by, limit_value)
-           values (?, ?, ?, ?, ?, ?, ?, ?)
-           on conflict (doctor_id, date) do update set is_off = excluded.is_off, start = excluded.start,
-             "end" = excluded."end", limit_by = excluded.limit_by, limit_value = excluded.limit_value""",
-        (me["clinic_id"], doctor_id, date, int(body.is_off), body.start, body.end, body.limit_by, body.limit_value),
-    )
+    save_day(db, me, doctor_id, date, body)
     log_event(db, me["clinic_id"], me["id"], "schedule", doctor_id, "day_changed", {"date": date, **body.model_dump()})
-    return {"date": date, "schedule": day_schedule(db, clinic_of(db, me), doctor_id, date)}
+    return {"date": date, "schedule": day_schedule(db, clinic_of(db, me), doctor_id, date),
+            "bookings_affected": bookings_on(db, [doctor_id], [date]) if body.is_off else 0}
+
+
+class Leave(BaseModel):
+    start_date: str
+    end_date: str
+    doctor_id: int | None = None   # empty = clinic holiday for every doctor
+    off: bool = True               # False = back to normal hours for those days
+
+
+@router.post("/schedules/leave")
+def leave(body: Leave, me=Depends(current_member), db=Depends(get_db)):
+    """Leave for one doctor, or a clinic holiday for everyone, over a range of dates."""
+    try:
+        a, b = Date.fromisoformat(body.start_date), Date.fromisoformat(body.end_date)
+    except ValueError:
+        raise HTTPException(422, "Pick valid dates.")
+    if b < a:
+        raise HTTPException(422, "The end date must be on or after the start date.")
+    if (b - a).days > 92:
+        raise HTTPException(422, "Pick at most three months at a time.")
+    if body.doctor_id:
+        doctor(db, me, body.doctor_id)
+        can_edit(me, body.doctor_id)
+        ids = [body.doctor_id]
+    else:
+        if not me["is_admin"]:
+            raise HTTPException(403, "Only the owner or an admin can set clinic holidays.")
+        ids = [r[0] for r in db.execute("select id from members where clinic_id = ? and kind = 'doctor' and status != 'inactive'",
+                                        (me["clinic_id"],))]
+    days = [(a + timedelta(days=i)).isoformat() for i in range((b - a).days + 1)]
+    for d in ids:
+        for day in days:
+            if body.off:
+                save_day(db, me, d, day, Override(is_off=True))
+            else:
+                db.execute("delete from schedule_overrides where doctor_id = ? and date = ?", (d, day))
+    log_event(db, me["clinic_id"], me["id"], "schedule", body.doctor_id, "leave" if body.off else "leave_cleared",
+              {"from": body.start_date, "to": body.end_date, "all_doctors": not body.doctor_id})
+    return {"days": len(days), "doctors": len(ids), "bookings_affected": bookings_on(db, ids, days) if body.off else 0}
 
 
 @router.delete("/schedules/{doctor_id}/{date}")
@@ -76,7 +139,7 @@ def reset_day(doctor_id: int, date: str, me=Depends(current_member), db=Depends(
 
 
 @router.get("/availability")
-def get_availability(doctor_id: int, date: str, exclude_visit: int | None = None,
+def get_availability(doctor_id: int, date: str, exclude_visit: int | None = None, session: str | None = None,
                      me=Depends(current_member), db=Depends(get_db)):
     doctor(db, me, doctor_id)
-    return availability(db, clinic_of(db, me), doctor_id, date, exclude_visit)
+    return availability(db, clinic_of(db, me), doctor_id, date, exclude_visit, session)
