@@ -223,7 +223,7 @@ table.t td { padding: 9px 8px; border-bottom: 1px solid var(--line); vertical-al
 table.t td input { width: 100%; border: 1.3px solid var(--line); border-radius: 8px; padding: 6px 8px; background: var(--white); }
 table.t tr.click { cursor: pointer; }
 table.t tr.click:hover td { background: var(--tile-2); }
-table.t tr.selected td { background: color-mix(in srgb, var(--lime) 18%, var(--tile)); }
+table.t tr.selected td { background: transparent; }
 .scroll { overflow-x: auto; }
 .doc { background: var(--white); border-radius: 12px; padding: 10px 12px; font-size: 13.5px; display: flex; flex-direction: column; gap: 4px; transition: background .3s; }
 .doc a { color: var(--ink); font-weight: 600; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }

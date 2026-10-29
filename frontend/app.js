@@ -94,6 +94,7 @@ window.addEventListener("hashchange", route);
 
 async function route() {
   stopTimers();
+  S.gen = (S.gen || 0) + 1;
   const [path, query] = (location.hash.slice(1) || "/").split("?");
   const parts = path.split("/").filter(Boolean);
   if (parts[0] === "invite") return viewInvite(parts[1]);
@@ -122,7 +123,8 @@ function shell(active) {
     </nav>
     <div class="stage"><main class="surface" id="view"><div class="muted">Loading…</div></main></div></div>`;
 }
-const view = html => { const v = $("#view"); if (v) v.innerHTML = html; };
+const view = (html, g) => { if (g !== undefined && g !== S.gen) return; const v = $("#view"); if (v) v.innerHTML = html; };
+const stale = g => g !== S.gen;
 
 /* ---------- login / onboarding / invite ---------- */
 const WAVE_H = [14, 26, 40, 22, 48, 34, 18, 52, 30, 44, 20, 38, 54, 28, 16, 42, 50, 24, 36, 46, 18, 32, 52, 26, 40, 20, 48, 30];
@@ -265,11 +267,13 @@ const readRules = p => ({ fee: Number($(`#${p}-fee`).value) || 0, days: [0, 1, 2
 
 /* ---------- operations ---------- */
 async function viewOps() {
+  const g = S.gen;
   S.date = S.date || TODAY;
   S.vf = S.vf || { q: "", st: "", doc: "" };
   const load = async () => {
     if (document.activeElement?.id === "vf-q") return;
     const d = await api(`/operations/day?date=${S.date}`);
+    if (stale(g)) return;
     S.data = d;
     const st = d.stats, waiting = d.visits.filter(v => v.status === "waiting"), withDoc = d.visits.filter(v => v.status === "with_doctor");
     view(`<div class="head"><div><h1>Operations</h1><p>${S.date === TODAY ? "Today" : niceDate(S.date)} at ${esc(S.clinic.name)}</p></div><span class="grow"></span>
@@ -293,7 +297,7 @@ async function viewOps() {
       </div>`);
   };
   await run(load);
-  if (S.date === TODAY) S.timer = setInterval(() => !M && run(load), 8000);
+  if (S.date === TODAY && !stale(g)) S.timer = setInterval(() => !M && !stale(g) && run(load), 8000);
 }
 const VF = [["", "All"], ["booked", "Booked"], ["waiting", "Waiting"], ["with_doctor", "In consultation"], ["done", "Done"], ["no_show", "No-show"]];
 function opsRows(vs) {
@@ -313,9 +317,11 @@ function doctorCard(d) {
 }
 
 async function viewQueue(doctorId) {
+  const g = S.gen;
   S.date = S.date || TODAY;
   const load = async () => {
     const q = await api(`/operations/queue?doctor_id=${doctorId}&date=${S.date}`);
+    if (stale(g)) return;
     S.data = q;
     const cols = [["booked", "Booked"], ["waiting", "Waiting"], ["with_doctor", "With doctor"], ["done", "Done"]];
     const s = q.schedule;
@@ -329,7 +335,7 @@ async function viewQueue(doctorId) {
       ${q.not_seen.length ? `<section class="panel"><span class="label">Not seen</span><div class="rows">${q.not_seen.map(v => `<div class="r q" style="grid-template-columns:minmax(0,1fr) auto"><span>${esc(v.patient_name)}</span>${pill(v.status)}</div>`).join("")}</div></section>` : ""}`);
   };
   await run(load);
-  if (S.date === TODAY) S.timer = setInterval(() => !M && run(load), 8000);
+  if (S.date === TODAY && !stale(g)) S.timer = setInterval(() => !M && !stale(g) && run(load), 8000);
 }
 function qCard(v, i, list) {
   const tok = v.token_label ? `<span class="tok chip">${v.token_label}</span>` : `<span class="tok none">No token yet</span>`;
@@ -567,6 +573,7 @@ function copyInvite(code, msg) {
 /* ---------- consultation (doctor workspace, full-screen layout) ---------- */
 const CTABS = [["brief", "Brief"], ["dictate", "Transcript"], ["note", "Note"]];
 async function viewConsult(visitId, doctorParam, patientParam) {
+  const g = S.gen;
   const isDoctor = S.me.kind === "doctor";
   const doctorId = Number(doctorParam) || (isDoctor ? S.me.id : S.doctors[0]?.id);
   if (!CTABS.some(t => t[0] === S.ctab)) S.ctab = "brief";
@@ -577,6 +584,7 @@ async function viewConsult(visitId, doctorParam, patientParam) {
     const pid = cur?.patient_id || Number(patientParam) || null;
     const profile = pid && S.me.screens.includes("patients") ? await api(`/patients/${pid}`) : null;
     const found = S.cq.trim() ? await api(`/patients?q=${encodeURIComponent(S.cq)}`) : [];
+    if (stale(g)) return;
     S.data = { today, cur, profile, found, doctorId, pid };
     renderConsult();
     if (cur && cur.status === "with_doctor" && !cur.brief && !S.briefing) {
@@ -741,10 +749,12 @@ async function addLine(visitId, text) {
 
 /* ---------- patients ---------- */
 async function viewPatients(id) {
+  const g = S.gen;
   S.pq = S.pq ?? "";
   await run(async () => {
     const list = await api(`/patients?q=${encodeURIComponent(S.pq)}`);
     const p = id ? await api(`/patients/${id}`) : null;
+    if (stale(g)) return;
     view(`<div class="head"><div><h1>Patients</h1></div><span class="grow"></span><button class="btn primary" data-a="register">New patient</button></div>
       <input class="input" id="pt-q" placeholder="Search name, phone or UHID" value="${esc(S.pq)}" data-a="pt-q" autocomplete="off" aria-label="Search patients">
       <div class="cols" style="grid-template-columns:minmax(0,1fr) minmax(0,1.2fr)">
@@ -785,6 +795,7 @@ function openPatientEdit(p) {
 
 /* ---------- administration ---------- */
 async function viewAdmin(tab) {
+  const g = S.gen;
   const editable = S.me.is_admin;
   const tabs = [["clinic", "Clinic details"], ["rules", "Clinic rules"], ["members", "Members"], ...(editable ? [["activity", "Activity"]] : [])];
   let body = "";
@@ -811,6 +822,7 @@ async function viewAdmin(tab) {
     body = `<div class="seg act-seg">${ACT_KINDS.map(([k, l]) => `<button data-a="act-kind" data-v="${k}" aria-pressed="${k === S.act.kind}">${l}</button>`).join("")}</div>
       <section class="panel"><div class="rows" id="act-rows">${actRows(S.act.events)}</div>${S.act.more ? `<div><button class="btn small" data-a="act-more">More</button></div>` : ""}</section>`;
   }
+  if (stale(g)) return;
   view(`<div class="head"><div><h1>Administration</h1></div></div>
     <div class="actions admin-tabs">${tabs.map(([k, l]) => `<button class="btn" data-a="ad-tab" data-v="${k}" aria-pressed="${k === tab}">${l}</button>`).join("")}</div>${body}`);
 }
