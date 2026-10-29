@@ -764,3 +764,44 @@ table.members tr.click:hover td:first-child b { text-decoration-color: var(--ink
 .login-home .login-footer { position: absolute; top: 100%; left: 0; right: 0; margin: 64px 0 0; display: flex; justify-content: center; align-items: center; gap: 10px; }
 .cx-row b { text-align: right; overflow-wrap: anywhere; }
 .login-home .dot-sep { margin: 0; }
+
+/* messages: one calm style, one line */
+.toast, .toast.err { background: var(--red); color: var(--red-ink); border: 0; border-radius: 16px; padding: 14px 22px; font-weight: 600; font-size: 15px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: min(560px, calc(100% - 32px)); box-shadow: 0 14px 34px -16px #0006; }
+.warn { background: var(--red); color: var(--red-ink); border-radius: 16px; padding: 14px 20px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* booking: patient chip */
+.pt-chip { display: flex; align-items: center; gap: 14px; background: var(--white); border-radius: 999px; padding: 8px 8px 8px 10px; }
+.pt-chip .avatar { width: 42px; height: 42px; background: var(--ink); color: var(--lime); font-size: 14px; }
+.pt-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.pt-main b { font-size: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pt-meta { display: flex; gap: 14px; font-size: 13px; color: var(--muted); }
+.pt-meta .mono { letter-spacing: .02em; }
+.booking-dialog { gap: 18px; }
+
+/* queue cards: calmer layout */
+.board .card { padding: 16px; gap: 10px; border-radius: 20px; }
+.board .card .top b { font-size: 16px; }
+.board .card .meta { gap: 8px 12px; }
+.board .card .acts { gap: 8px; padding-top: 10px; margin-top: 2px; border-top: 1px solid var(--line); }
+.board .card .acts .btn.small { min-height: 34px; padding: 0 14px; }
+.board .card .acts .btn.ghost { border: 1px solid var(--line); }
+.board .card .acts .btn.dark { flex: 1 0 100%; justify-content: center; }
+.board .card .acts .icon-btn { width: 34px; min-width: 34px; padding: 0; }
+
+/* file picker */
+.file-drop { display: flex; align-items: center; gap: 14px; border: 1.5px dashed color-mix(in srgb, var(--ink) 35%, transparent); border-radius: 999px; padding: 8px 20px 8px 8px; cursor: pointer; transition: border-color .2s, background .2s; }
+.file-drop:hover, .file-drop.has { border-color: var(--ink); background: var(--white); }
+.file-drop input { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+.file-btn { background: var(--ink); color: var(--lime); border-radius: 999px; padding: 10px 18px; font-weight: 700; font-size: 14px; flex: none; }
+.file-name { color: var(--muted); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.file-drop.has .file-name { color: var(--ink); }
+
+/* login: links closer to the fields */
+.login-home .login-footer { margin-top: 28px; }
+.board .card .acts .btn:not(.dark):not(.icon-btn) { flex: 1; justify-content: center; }
+.board .card .acts:has(.acts-row) { flex-direction: column; flex-wrap: nowrap; }
+.acts-row { display: flex; gap: 8px; }
+.acts-row .btn { flex: 1; justify-content: center; }
+.acts-row .btn.icon-btn { flex: none; }
+.board .card .acts .acts-row .btn.dark { flex: 1; }

@@ -27,7 +27,7 @@ CANCEL_REASONS = {"Patient request", "Doctor unavailable", "Booked by mistake", 
 
 def move(db, me, visit: dict, to: str, **fields) -> None:
     if to not in MOVES.get(visit["status"], set()):
-        raise HTTPException(409, f"A {visit['status'].replace('_', ' ')} visit cannot become {to.replace('_', ' ')}.")
+        raise HTTPException(409, f"Can't change this visit now.")
     sets = {"status": to, **fields}
     db.execute(f"update visits set {', '.join(f'{k} = ?' for k in sets)} where id = ?", (*sets.values(), visit["id"]))
     log_event(db, me["clinic_id"], me["id"], "visit", visit["id"], to, {k: v for k, v in fields.items() if v is not None} or None)
@@ -173,7 +173,7 @@ def check_patient_free(db, me, patient_id, doctor_id, day, exclude=None):
         raise HTTPException(404, "Patient not found.")
     if db.execute(f"select 1 from visits where patient_id = ? and doctor_id = ? and date = ? and {ACTIVE} and id is not ?",
                   (patient_id, doctor_id, day, exclude)).fetchone():
-        raise HTTPException(409, "This patient already has a visit with this doctor on that day.")
+        raise HTTPException(409, "Already booked with this doctor.")
 
 
 def pick_token(avail: dict, wanted: int | None) -> int | None:
@@ -183,7 +183,7 @@ def pick_token(avail: dict, wanted: int | None) -> int | None:
     if wanted is None:
         return free[0]
     if wanted not in free:
-        raise HTTPException(409, f"Token {wanted} is not free. Pick another.")
+        raise HTTPException(409, f"Token {wanted} is taken.")
     return wanted
 
 
@@ -192,7 +192,7 @@ def charge(db, me, fee: int, body: Payment) -> dict:
     if body.discount > fee:
         raise HTTPException(422, "Discount cannot be more than the fee.")
     if body.discount and not body.discount_reason.strip():
-        raise HTTPException(422, "Give a reason for the discount or waiver.")
+        raise HTTPException(422, "Add a reason.")
     amount = fee - body.discount
     if amount > 0 and not body.payment_method:
         raise HTTPException(422, "Choose how the patient paid.")
@@ -260,7 +260,7 @@ def arrive(visit_id: int, body: Payment, me=Depends(front_desk), db=Depends(get_
     if v["status"] != "booked":
         raise HTTPException(409, "This patient has already arrived.")
     if v["date"] != Date.today().isoformat():
-        raise HTTPException(409, "Patients can only arrive on the day of their visit.")
+        raise HTTPException(409, "Arrival only on the visit day.")
     clinic = clinic_of(db, me)
     token = v["token"]
     if clinic["token_timing"] == "arrival" or token is None:
@@ -275,7 +275,7 @@ def undo_arrival(visit_id: int, body: Cancel, me=Depends(front_desk), db=Depends
     """Marked as arrived by mistake: back to Booked, and the payment is refunded."""
     v = get_visit(db, me, visit_id)
     if v["status"] != "waiting" or v["is_walk_in"]:
-        raise HTTPException(409, "Only a booked patient who is still waiting can be moved back.")
+        raise HTTPException(409, "This arrival can't be undone.")
     clinic = clinic_of(db, me)
     token = None if clinic["token_timing"] == "arrival" else v["token"]
     paid = v["amount_paid"] or 0
@@ -330,7 +330,7 @@ def toggle_late(visit_id: int, me=Depends(front_desk), db=Depends(get_db)):
     """A booked patient called to say they are running late: keep the booking past session end."""
     v = get_visit(db, me, visit_id)
     if v["status"] != "booked":
-        raise HTTPException(409, "Only booked patients can be marked late.")
+        raise HTTPException(409, "Only booked patients can be late.")
     db.execute("update visits set late = ? where id = ?", (0 if v["late"] else 1, visit_id))
     log_event(db, me["clinic_id"], me["id"], "visit", visit_id, "late_off" if v["late"] else "late_on")
     return visit_out(db, me, visit_id)
@@ -341,7 +341,7 @@ def reschedule(visit_id: int, body: Reschedule, me=Depends(front_desk), db=Depen
     db.lock(f"tokens:{body.doctor_id}:{body.date}")
     v = get_visit(db, me, visit_id)
     if v["status"] != "booked":
-        raise HTTPException(409, "Only bookings that haven't arrived can be rescheduled.")
+        raise HTTPException(409, "Already arrived. Can't reschedule.")
     if body.date < Date.today().isoformat():
         raise HTTPException(422, "Pick today or a later date.")
     clinic = clinic_of(db, me)

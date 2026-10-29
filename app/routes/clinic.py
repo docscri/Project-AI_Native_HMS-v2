@@ -31,7 +31,7 @@ def clean_email(email: str) -> str:
 def clean_phone(phone: str | None) -> str:
     phone = re.sub(r"[\s-]", "", phone or "")
     if phone and not re.fullmatch(r"\+?\d{10,13}", phone):
-        raise HTTPException(422, "Enter a valid phone number (10 digits).")
+        raise HTTPException(422, "Enter a valid phone number.")
     return phone
 
 
@@ -55,7 +55,7 @@ class Login(BaseModel):
 def login(body: Login, db=Depends(get_db)):
     m = row(db.execute("select * from members where lower(email) = lower(?)", (body.email.strip(),)).fetchone())
     if m and m["locked_until"] and m["locked_until"] > now():
-        raise HTTPException(423, f"Too many wrong attempts. Try again in {LOCK_MINUTES} minutes or reset your password.")
+        raise HTTPException(423, f"Locked. Try in {LOCK_MINUTES} minutes.")
     if not m or m["status"] != "active" or not check_password(body.password, m["password_hash"]):
         if m:
             fails = (m["failed_logins"] or 0) + 1
@@ -127,7 +127,7 @@ class Reset(BaseModel):
 def reset_password(body: Reset, db=Depends(get_db)):
     r = row(db.execute("select * from password_resets where token_hash = ?", (token_hash(body.code),)).fetchone())
     if not r or r["used_at"] or r["expires_at"] < now():
-        raise HTTPException(410, "This reset link has expired. Ask for a new one.")
+        raise HTTPException(410, "Link expired. Ask for a new one.")
     validate_password(body.password)
     db.execute("update members set password_hash = ?, failed_logins = 0, locked_until = null where id = ?",
                (hash_password(body.password), r["member_id"]))
@@ -160,7 +160,7 @@ def create_owner(body: Owner, db=Depends(get_db)):
     email = clean_email(body.email)
     validate_password(body.password)
     if db.execute("select 1 from members where lower(email) = lower(?)", (email,)).fetchone():
-        raise HTTPException(409, "An account with this email already exists. Log in instead.")
+        raise HTTPException(409, "Email already registered.")
     clinic_id = db.execute("insert into clinics default values").lastrowid
     mid = db.execute(
         """insert into members (clinic_id, kind, is_owner, is_admin, name, email, phone, password_hash,
@@ -184,10 +184,10 @@ class OwnerEdit(BaseModel):
 def edit_owner(body: OwnerEdit, me=Depends(current_member), db=Depends(get_db)):
     """Back to step 1 during setup: the owner can still change everything they entered."""
     if not me["is_owner"] or clinic_of(db, me)["onboarded"]:
-        raise HTTPException(403, "Change these in your account settings.")
+        raise HTTPException(403, "Change this in your account.")
     email = clean_email(body.email)
     if db.execute("select 1 from members where lower(email) = lower(?) and id != ?", (email, me["id"])).fetchone():
-        raise HTTPException(409, "An account with this email already exists.")
+        raise HTTPException(409, "Email already registered.")
     db.execute("update members set name = ?, email = ?, phone = ?, kind = ?, speciality = ? where id = ?",
                (body.name.strip(), email, clean_phone(body.phone), "doctor" if body.is_doctor else "staff",
                 (me.get("speciality") or "General medicine") if body.is_doctor else None, me["id"]))
@@ -289,7 +289,7 @@ def add_member(body: NewMember, me=Depends(require_admin), db=Depends(get_db)):
     """Step 4 and Administration → Members. Returns an invite code (sent by email in a real setup)."""
     email = clean_email(body.email)
     if db.execute("select 1 from members where lower(email) = lower(?)", (email,)).fetchone():
-        raise HTTPException(409, "Someone with this email is already a member.")
+        raise HTTPException(409, "Email already a member.")
     if body.fee_override is not None and body.fee_override < 0:
         raise HTTPException(422, "Fee cannot be negative.")
     code = new_code()
@@ -330,7 +330,7 @@ def admin_reset_link(member_id: int, me=Depends(require_admin), db=Depends(get_d
     """For staff who forgot their password when email is not set up: the admin shares this link."""
     m = row(db.execute("select * from members where id = ? and clinic_id = ?", (member_id, me["clinic_id"])).fetchone())
     if not m or m["status"] != "active":
-        raise HTTPException(409, "Only active members can reset a password.")
+        raise HTTPException(409, "Member isn't active.")
     log_event(db, me["clinic_id"], me["id"], "member", member_id, "reset_link_created")
     return {"code": make_reset(db, member_id)}
 
@@ -366,7 +366,7 @@ def update_member(member_id: int, body: MemberUpdate, me=Depends(require_admin),
         raise HTTPException(409, "Someone else already uses this email.")
     if body.kind and body.kind != m["kind"] and m["kind"] == "doctor" and db.execute(
             "select 1 from visits where doctor_id = ?", (member_id,)).fetchone():
-        raise HTTPException(409, "This doctor has visits and must stay a doctor.")
+        raise HTTPException(409, "Doctor has visits. Can't change.")
     changes = body.model_dump(exclude_none=True, exclude={"clear_fee"})
     if "screens" in changes:
         changes["screens"] = json.dumps([s for s in changes["screens"] if s in SCREENS])
@@ -419,7 +419,7 @@ def view_invite(code: str, db=Depends(get_db)):
     if not m:
         raise HTTPException(404, "This invitation link is not valid.")
     if m["invite_expires_at"] and m["invite_expires_at"] < now():
-        raise HTTPException(410, "This invitation has expired. Ask the clinic for a new link.")
+        raise HTTPException(410, "Invite expired. Ask for a new link.")
     m.pop("invite_expires_at")
     return m
 
@@ -430,7 +430,7 @@ def accept_invite(body: Accept, db=Depends(get_db)):
     if not m:
         raise HTTPException(404, "This invitation link is not valid.")
     if m["invite_expires_at"] and m["invite_expires_at"] < now():
-        raise HTTPException(410, "This invitation has expired. Ask the clinic for a new link.")
+        raise HTTPException(410, "Invite expired. Ask for a new link.")
     validate_password(body.password)
     db.execute("update members set password_hash = ?, status = 'active', invite_code = null, invite_expires_at = null where id = ?",
                (hash_password(body.password), m["id"]))

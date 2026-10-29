@@ -163,10 +163,10 @@ async def upload(visit_id: int, tasks: BackgroundTasks, file: UploadFile = File(
     if mime == "image/jpg":
         mime = "image/jpeg"
     if mime not in storage.ALLOWED:
-        raise HTTPException(415, "Upload a PDF, photo (JPG, PNG, WEBP, HEIC) or text file.")
+        raise HTTPException(415, "Use a PDF, photo or text file.")
     data = await file.read(storage.MAX_BYTES + 1)
     if len(data) > storage.MAX_BYTES:
-        raise HTTPException(413, "File is too large. The limit is 15 MB.")
+        raise HTTPException(413, "File over 15 MB.")
     if not data:
         raise HTTPException(422, "The file is empty.")
     path = storage.save(me["clinic_id"], data, mime)
@@ -187,7 +187,7 @@ def document_file(doc_id: int, me=Depends(current_member), db=Depends(get_db)):
     try:
         data = storage.read(d["path"])
     except Exception:
-        raise HTTPException(404, "The file could not be found in storage.")
+        raise HTTPException(404, "File not found.")
     return Response(data, media_type=d["mime"], headers={"Content-Disposition": f'inline; filename="{d["filename"]}"'})
 
 
@@ -203,10 +203,10 @@ def draft(visit_id: int, me=Depends(doctor_screen), db=Depends(get_db)):
     v = get_visit(db, me, visit_id)
     existing = load_note(db, visit_id)
     if existing and existing["status"] == "signed":
-        raise HTTPException(409, "This note is signed and cannot change.")
+        raise HTTPException(409, "Note is signed.")
     patient, items = evidence_for(db, v)
     if not any(i["kind"] == "transcript" for i in items) and not any(i["kind"] == "document" for i in items):
-        raise HTTPException(422, "Dictate or add a document first. The note is drafted from them.")
+        raise HTTPException(422, "Dictate or add a document first.")
     d = ai.draft_note(patient, items)
     content = json.dumps({"soap": d["soap"], "rx": d["rx"]})
     if existing:
@@ -239,7 +239,7 @@ def edit_note(note_id: int, body: NoteEdit, me=Depends(doctor_screen), db=Depend
     if not n:
         raise HTTPException(404, "Note not found.")
     if n["status"] == "signed":
-        raise HTTPException(409, "This note is signed and cannot change.")
+        raise HTTPException(409, "Note is signed.")
     db.execute("update notes set content = ?, updated_at = ? where id = ?",
                (json.dumps({"soap": body.soap, "rx": body.rx}), now(), note_id))
     return load_note(db, n["visit_id"])

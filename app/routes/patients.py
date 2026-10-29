@@ -45,7 +45,7 @@ def clean(body) -> dict:
         if dob > date.today():
             raise HTTPException(422, "Date of birth can't be in the future.")
         if (date.today() - dob).days > 120 * 366:
-            raise HTTPException(422, "Check the date of birth: age is over 120.")
+            raise HTTPException(422, "Check the date of birth.")
     elif "dob" in out:
         out["dob"] = None
     if "address" in out:
@@ -147,7 +147,7 @@ def merge(patient_id: int, body: Merge, me=Depends(require_screen("patients")), 
            where a.patient_id = ? and b.patient_id = ? and a.status not in ('cancelled', 'no_show') and b.status not in ('cancelled', 'no_show')""",
         (keep["id"], other["id"])).fetchone()
     if clash:
-        raise HTTPException(409, "Both records have a visit with the same doctor on the same day. Cancel one first.")
+        raise HTTPException(409, "Both have a visit that day. Cancel one.")
     for table in ("visits", "notes", "documents"):
         db.execute(f"update {table} set patient_id = ? where patient_id = ?", (keep["id"], other["id"]))
     fill = {k: other[k] for k in ("dob", "sex", "phone", "address") if not keep[k] and other[k]}

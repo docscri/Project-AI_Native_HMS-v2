@@ -56,10 +56,10 @@ async function api(path, opts = {}) {
   if (body && !(body instanceof FormData)) { headers["Content-Type"] = "application/json"; body = JSON.stringify(body); }
   const res = await fetch("/api" + path, { method: opts.method || (body ? "POST" : "GET"), headers, body });
   const data = await res.json().catch(() => ({}));
-  if (res.status === 401 && !opts.quiet && S.token) { endLocal(); throw new Error(data.detail || "Your session has ended. Please log in again."); }
+  if (res.status === 401 && !opts.quiet && S.token) { endLocal(); throw new Error(data.detail || "Session ended. Log in again."); }
   if (!res.ok) {
     const d = data.detail;
-    throw new Error(Array.isArray(d) ? d.map(x => `${x.loc?.slice(-1)[0]}: ${x.msg}`).join(", ") : d || "Something went wrong.");
+    throw new Error(Array.isArray(d) ? `Check ${String(d[0]?.loc?.slice(-1)[0] || "the form").replace(/_/g, " ")}.` : d || "Something went wrong.");
   }
   return data;
 }
@@ -341,7 +341,7 @@ function qCard(v, i, list) {
   let meta = sess, acts = "";
   if (v.status === "booked") {
     meta += (v.expected_time ? `<span>${S.clinic.limit_by === "minutes" ? "" : "~"}${v.expected_time}</span>` : "") + (v.late ? `<span class="pill s-waiting">Late</span>` : "");
-    acts = `<button class="btn small dark" data-a="arrive" data-v="${v.id}">Arrived</button><button class="btn small" data-a="late" data-v="${v.id}" aria-pressed="${v.late}">Late</button><button class="btn small" data-a="resched" data-v="${v.id}">Reschedule</button><button class="btn small ghost" data-a="cancel" data-v="${v.id}">Cancel</button>${clip}`;
+    acts = `<div class="acts-row"><button class="btn small dark" data-a="arrive" data-v="${v.id}">Arrived</button><button class="btn small icon-btn" data-a="v-more" data-v="${v.id}" aria-label="More">⋯</button></div><div class="acts-row"><button class="btn small" data-a="late" data-v="${v.id}" aria-pressed="${v.late}">Late</button><button class="btn small" data-a="resched" data-v="${v.id}">Reschedule</button></div>`;
   } else if (v.status === "waiting") {
     const same = list.filter(x => x.session_start === v.session_start), k = same.indexOf(v);
     meta += `${paid}${refunded}${v.is_walk_in ? `<span class="pill s-soft">Walk-in</span>` : ""}<span>since ${(v.arrived_at || "").slice(11, 16)}</span>`;
@@ -359,7 +359,7 @@ let M = null;
 function openBooking(mode, opts = {}) {
   M = { kind: "booking", mode, patient: opts.patient || null, q: "", results: [], doctorId: opts.doctorId || S.doctors[0]?.id, date: mode === "walk" ? TODAY : (S.date && S.date >= TODAY ? S.date : TODAY),
         avail: null, token: null, pay: "upi", session: opts.visit?.session_start || null, reason: "", visit: opts.visit || null, done: null };
-  if (!S.doctors.length) return toast("Add a doctor first (Administration → Members).", true);
+  if (!S.doctors.length) return toast("Add a doctor first.", true);
   loadAvail();
 }
 async function loadAvail() {
@@ -390,8 +390,7 @@ function renderBooking() {
   const sessChips = (a.sessions || []).length > 1 ? `<div class="seg">${a.sessions.map(x => `<button data-a="bk-session" data-v="${x.key}" aria-pressed="${x.key === b.session}" ${x.ended ? "disabled" : ""}>${x.label} · ${x.start}–${x.end}</button>`).join("")}</div>` : "";
   const extra = b.mode === "walk" && a.available ? payBlock(a.fee, b.pay) : b.mode === "resched" ? reasonChips(RESCHED_REASONS, b.reason, "bk-reason") : "";
   modal(`<div class="booking-dialog"><h2>${title}</h2>
-    <div class="field">Patient</div>
-    ${p ? `<div class="hit actions" style="justify-content:space-between;align-items:center"><span><b>${esc(p.name)}</b> <span class="mono muted">${esc(p.uhid)}</span> · ${esc(p.phone)}</span>${b.mode === "resched" ? "" : `<button class="btn small" data-a="bk-clear">Change</button>`}</div>`
+    ${p ? `<div class="pt-chip"><span class="avatar">${esc(initials(p.name))}</span><span class="pt-main"><b>${esc(p.name)}</b><span class="pt-meta"><span class="mono">${esc(p.uhid)}</span>${p.phone ? `<span>${esc(p.phone)}</span>` : ""}</span></span>${b.mode === "resched" ? "" : `<button class="btn small" data-a="bk-clear">Change</button>`}</div>`
         : `<input class="input" id="bk-q" placeholder="Search name, phone or UHID" value="${esc(b.q)}" data-a="bk-q" autocomplete="off">
            <div class="pick">${b.results.map(r => `<button data-a="bk-pick" data-v="${r.id}"><span><b>${esc(r.name)}</b> · ${esc(r.phone)}</span><span class="mono muted">${esc(r.uhid)}</span></button>`).join("")}</div>`}
     <div class="grid2 booking-fields">
@@ -456,13 +455,13 @@ async function openCollections() {
 function openUpload(visitId) {
   M = { kind: "upload", visitId };
   modal(`<h2>Add document</h2>
-    <label class="field">File<input type="file" id="up-file" accept="image/*,.pdf,.txt"></label>
+    <label class="file-drop"><input type="file" id="up-file" accept="image/*,.pdf,.txt" data-a="up-file"><span class="file-btn">Choose file</span><span class="file-name" id="up-name">No file</span></label>
     <div class="foot"><button class="btn" data-a="close">Close</button><button class="btn primary" data-a="upload-go">Upload</button></div>`);
 }
 async function doUpload(visitId, file) {
   const fd = new FormData(); fd.append("file", file);
   await api(`/visits/${visitId}/documents`, { body: fd });
-  toast("Uploaded. The AI is reading it.");
+  toast("Uploaded.");
 }
 function openRegister(name) {
   const back = M?.kind === "booking" ? M : null;
@@ -842,7 +841,7 @@ document.addEventListener("click", e => {
   const t = e.target.closest("[data-a]"); if (!t) return;
   const a = t.dataset.a, v = t.dataset.v;
   if (a === "scrim") { if (e.target === t && M?.kind !== "sched") closeModal(); return; }
-  if (["lim", "mg-q", "vf-q", "vf-doc", "pay-disc", "bk-q", "pt-q", "cs-q", "bk-date", "bk-doc", "sc-doc", "sc-month-picker", "sc-year-picker", "cs-doc"].includes(a)) return;
+  if (["lim", "up-file", "mg-q", "vf-q", "vf-doc", "pay-disc", "bk-q", "pt-q", "cs-q", "bk-date", "bk-doc", "sc-doc", "sc-month-picker", "sc-year-picker", "cs-doc"].includes(a)) return;
   e.preventDefault();
   const D = S.data;
   run(async () => {
@@ -903,7 +902,8 @@ document.addEventListener("click", e => {
       case "v-more": { const vis = Object.values(D.columns).flat().find(x => x.id === Number(v)); M = { kind: "more" };
         modal(`<h2>${esc(vis.patient_name)}</h2><div class="more-list">${vis.paid_at ? `<button class="btn" data-a="receipt" data-v="${v}">Receipt</button>` : ""}
           ${(vis.amount_paid || 0) > (vis.refund_amount || 0) ? `<button class="btn" data-a="refund" data-v="${v}">Refund</button>` : ""}
-          ${vis.status === "waiting" && !vis.is_walk_in ? `<button class="btn" data-a="undo-arrival" data-v="${v}">Undo arrival</button>` : ""}</div>
+          ${vis.status === "waiting" && !vis.is_walk_in ? `<button class="btn" data-a="undo-arrival" data-v="${v}">Undo arrival</button>` : ""}
+          ${vis.status === "booked" ? `<button class="btn" data-a="upload" data-v="${v}">Add document</button><button class="btn danger" data-a="cancel" data-v="${v}">Cancel booking</button>` : ""}</div>
           <div class="foot"><button class="btn" data-a="close">Back</button></div>`); break; }
       case "collections": await openCollections(); break;
       case "refund": openRefund(Object.values(D.columns).flat().find(x => x.id === Number(v))); break;
@@ -947,7 +947,7 @@ document.addEventListener("click", e => {
       case "mb-save": await saveMember(); break;
       case "ad-tab": go(`#/admin/${v}`); break;
       case "ad-details": S.clinic = await api("/clinic", { method: "PUT", body: { name: $("#ad-name").value, phone: $("#ad-phone").value, address: $("#ad-addr").value } }); toast("Saved"); route(); break;
-      case "ad-rules": S.clinic = await api("/clinic/rules", { method: "PUT", body: readRules("ad") }); toast("Rules saved. Booking now follows them."); route(); break;
+      case "ad-rules": S.clinic = await api("/clinic/rules", { method: "PUT", body: readRules("ad") }); toast("Rules saved."); route(); break;
       case "pt-open": go(`#/patients/${v}`); break;
       case "pt-edit": openPatientEdit(await api(`/patients/${v}`)); break;
       case "pe-save": await api(`/patients/${M.id}`, { method: "PATCH", body: { name: $("#pe-name").value, phone: $("#pe-phone").value, dob: $("#pe-dob").value || null, sex: $("#pe-sex").value, address: $("#pe-addr").value } }); closeModal(); toast("Saved"); route(); break;
@@ -955,7 +955,7 @@ document.addEventListener("click", e => {
       case "cs-side": S.cside = v; renderConsult(); break;
       case "cs-left": S.cleft = v; refreshConsult(); break;
       case "cs-patient": go(`#/consult?doctor=${D.doctorId}&patient=${v}`); break;
-      case "cs-draft-go": await api(`/visits/${v}/note/draft`, { body: {} }); S.ctab = "note"; toast("Draft ready. Check it, then sign."); refreshConsult(); break;
+      case "cs-draft-go": await api(`/visits/${v}/note/draft`, { body: {} }); S.ctab = "note"; toast("Draft ready."); refreshConsult(); break;
       case "note-sign-ro": await api(`/notes/${v}`, { method: "PUT", body: D.cur.note.content }); await api(`/notes/${v}/sign`, { body: {} }); toast("Signed. Visit complete."); refreshConsult(); break;
       case "cs-next-mic": { const r = await api(`/consultation/next?doctor_id=${v}`, { body: {} }); S.ctab = "dictate"; await new Promise(res => { const once = () => { window.removeEventListener("hashchange", once); setTimeout(res, 300); }; window.addEventListener("hashchange", once); go(`#/consult/${r.id}?doctor=${v}`); }); startMic(r.id); break; }
       case "cs-collapse": S.rightCollapsed = !S.rightCollapsed; renderConsult(); break;
@@ -969,7 +969,7 @@ document.addEventListener("click", e => {
       case "cs-open": go(`#/consult/${v}?doctor=${D.doctorId}`); break;
       case "cs-start": await api(`/visits/${v}/start`, { body: {} }); refreshConsult(); break;
       case "cs-brief": await api(`/visits/${v}/brief`, { body: {} }); toast("Brief updated"); refreshConsult(); break;
-      case "cs-draft": await api(`/visits/${v}/note/draft`, { body: {} }); S.ctab = "note"; toast("Draft ready. Check it, edit, then sign."); refreshConsult(); break;
+      case "cs-draft": await api(`/visits/${v}/note/draft`, { body: {} }); S.ctab = "note"; toast("Draft ready."); refreshConsult(); break;
       case "mic": if (S.rec) { const r = S.rec; S.rec = null; S.recStart = null; clearInterval(S.recT); r.stop(); refreshConsult(); } else { S.ctab = "dictate"; startMic(Number(v)); } break;
       case "spk": S.speaker = v; document.querySelectorAll('[data-a="spk"]').forEach(b => b.setAttribute("aria-pressed", b.dataset.v === v)); break;
       case "dict-add": { const i = $("#dict-in"); await addLine(Number(v), i.value); break; }
@@ -983,7 +983,7 @@ document.addEventListener("click", e => {
       case "note-sign": await api(`/notes/${v}`, { method: "PUT", body: readNote() }); await api(`/notes/${v}/sign`, { body: {} }); toast("Signed. Visit complete."); refreshConsult(); break;
       case "print": window.open(`/api/notes/${v}/print?token=${encodeURIComponent(S.token)}`, "_blank"); break;
       case "open-doc": { const res = await fetch(`/api/documents/${v}/file`, { headers: { Authorization: "Bearer " + S.token } }); window.open(URL.createObjectURL(await res.blob()), "_blank"); break; }
-      case "cite": { const el = document.getElementById("ev-" + v); if (el) { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); el.classList.add("hl"); setTimeout(() => el.classList.remove("hl"), 1800); } else toast(v.startsWith("N") ? "From an earlier signed note (see Patients → history)" : "Source: " + v); break; }
+      case "cite": { const el = document.getElementById("ev-" + v); if (el) { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); el.classList.add("hl"); setTimeout(() => el.classList.remove("hl"), 1800); } else toast(v.startsWith("N") ? "From an earlier note." : "Source: " + v); break; }
     }
   });
 });
@@ -999,6 +999,7 @@ document.addEventListener("input", e => {
   const a = e.target.dataset?.a;
   if (a === "bk-q") searchPatients(e.target.value);
   if (a === "pay-disc") payShow();
+  if (a === "up-file") { const f = e.target.files[0]; $("#up-name").textContent = f ? f.name : "No file"; $(".file-drop").classList.toggle("has", !!f); }
   if (a === "mg-q") { M.q = e.target.value; clearTimeout(searchT); searchT = setTimeout(() => run(async () => { if (M?.kind !== "merge") return; M.results = M.q.trim() ? await api(`/patients?q=${encodeURIComponent(M.q)}`) : []; renderMerge(); }), 180); }
   if (a === "vf-q") { S.vf.q = e.target.value; const r = $("#ops-rows"); if (r && S.data?.visits) r.innerHTML = opsRows(S.data.visits); }
   if (a === "cs-q") { S.cq = e.target.value; clearTimeout(S.cqt); S.cqt = setTimeout(async () => { await run(S.reloadConsult); const q = $("#cs-q"); if (q) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); } }, 220); }

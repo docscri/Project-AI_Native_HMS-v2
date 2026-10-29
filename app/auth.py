@@ -36,9 +36,9 @@ def check_password(password: str, stored: str | None) -> bool:
 
 def validate_password(password: str) -> None:
     if len(password) < MIN_PASSWORD:
-        raise HTTPException(422, f"Password must be at least {MIN_PASSWORD} characters.")
+        raise HTTPException(422, f"Password: {MIN_PASSWORD}+ characters.")
     if password.isdigit() or password.isalpha():
-        raise HTTPException(422, "Use letters and numbers in the password.")
+        raise HTTPException(422, "Use letters and numbers.")
 
 
 def token_hash(token: str) -> str:
@@ -93,19 +93,19 @@ def member_for_token(db, token: str) -> dict | None:
 def current_member(authorization: str = Header(default=""), db=Depends(get_db)) -> dict:
     m = member_for_token(db, authorization.removeprefix("Bearer ").strip())
     if not m:
-        raise HTTPException(401, "Your session has ended. Please log in again.")
+        raise HTTPException(401, "Session ended. Log in again.")
     return public_member(m)
 
 
 def require_screen(screen: str):
     def check(me: dict = Depends(current_member)) -> dict:
         if screen not in me["screens"]:
-            raise HTTPException(403, f"You don't have access to {screen.title()}.")
+            raise HTTPException(403, f"No access to {screen.title()}.")
         return me
     return check
 
 
 def require_admin(me: dict = Depends(current_member)) -> dict:
     if not me["is_admin"]:
-        raise HTTPException(403, "Only the owner or an admin can change this.")
+        raise HTTPException(403, "Only an admin can change this.")
     return me

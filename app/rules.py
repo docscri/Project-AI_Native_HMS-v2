@@ -51,9 +51,9 @@ def validate_sessions(sessions: list[dict]) -> list[dict]:
     out = sorted(({"start": s["start"], "end": s["end"]} for s in sessions), key=lambda s: s["start"])
     for i, s in enumerate(out):
         if not (s["start"] and s["end"]) or s["start"] >= s["end"]:
-            raise HTTPException(422, "Each session must end after it starts.")
+            raise HTTPException(422, "Session end is before start.")
         if i and s["start"] < out[i - 1]["end"]:
-            raise HTTPException(422, "Sessions overlap. Make one end before the next starts.")
+            raise HTTPException(422, "Sessions overlap.")
     return out
 
 
@@ -143,7 +143,7 @@ def availability(db, clinic: dict, doctor_id: int, day: str, exclude_visit: int 
     """Capacity for each session that day, plus the chosen session (asked for, or the first open one)."""
     sched = day_schedule(db, clinic, doctor_id, day)
     if not sched:
-        return {"available": False, "reason": "Doctor is off on this day.", "sessions": []}
+        return {"available": False, "reason": "Doctor is off.", "sessions": []}
     infos = [session_info(db, clinic, s, doctor_id, day, exclude_visit) for s in sched["sessions"]]
     chosen = next((i for i in infos if i["key"] == session), None) if session else None
     if not chosen:
@@ -152,9 +152,9 @@ def availability(db, clinic: dict, doctor_id: int, day: str, exclude_visit: int 
            "schedule": chosen, "used": chosen["used"], "left": chosen["left"],
            "token_timing": clinic["token_timing"], "fee": doctor_fee(db, clinic, doctor_id)}
     if chosen["ended"]:
-        out["reason"] = "This session has ended."
+        out["reason"] = "Session ended."
     elif chosen["left"] <= 0:
-        out["reason"] = "This session is full."
+        out["reason"] = "Session full."
     for k in ("free_tokens", "next", "expected_time"):
         if k in chosen:
             out[k] = chosen[k]

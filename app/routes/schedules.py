@@ -16,7 +16,7 @@ router = APIRouter(prefix="/api")
 
 def can_edit(me: dict, doctor_id: int) -> None:
     if me["id"] != doctor_id and "operations" not in me["screens"] and not me["is_admin"]:
-        raise HTTPException(403, "Only the doctor or front desk can change this schedule.")
+        raise HTTPException(403, "You can't change this schedule.")
 
 
 def doctor(db, me, doctor_id: int) -> dict:
@@ -62,7 +62,7 @@ def save_day(db, me, doctor_id: int, day: str, body: Override) -> None:
         raw = [x.model_dump() for x in body.sessions] or ([{"start": body.start, "end": body.end}] if body.start and body.end else [])
         sessions = validate_sessions(raw)
         if not (body.limit_by and body.limit_value):
-            raise HTTPException(422, "Set how many patients the doctor sees.")
+            raise HTTPException(422, "Set the patient limit.")
     db.execute(
         """insert into schedule_overrides (clinic_id, doctor_id, date, is_off, start, "end", sessions, limit_by, limit_value)
            values (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -106,7 +106,7 @@ def leave(body: Leave, me=Depends(current_member), db=Depends(get_db)):
     except ValueError:
         raise HTTPException(422, "Pick valid dates.")
     if b < a:
-        raise HTTPException(422, "The end date must be on or after the start date.")
+        raise HTTPException(422, "End date is before start.")
     if (b - a).days > 92:
         raise HTTPException(422, "Pick at most three months at a time.")
     if body.doctor_id:
@@ -115,7 +115,7 @@ def leave(body: Leave, me=Depends(current_member), db=Depends(get_db)):
         ids = [body.doctor_id]
     else:
         if not me["is_admin"]:
-            raise HTTPException(403, "Only the owner or an admin can set clinic holidays.")
+            raise HTTPException(403, "Only an admin can set holidays.")
         ids = [r[0] for r in db.execute("select id from members where clinic_id = ? and kind = 'doctor' and status != 'inactive'",
                                         (me["clinic_id"],))]
     days = [(a + timedelta(days=i)).isoformat() for i in range((b - a).days + 1)]
