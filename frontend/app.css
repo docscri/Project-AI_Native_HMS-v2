@@ -727,7 +727,7 @@ table.members tr.click:hover td:first-child b { text-decoration-color: var(--ink
 .login-card .login-sub { margin: 0 0 22px; }
 .login-card .login-title { margin-bottom: 6px; color: var(--surface); }
 
-/* sessions, filters, payments, collections */
+/* sessions, filters, payments */
 .sess-row { display: flex; align-items: center; gap: 8px; }
 .sess-row .grid2 { flex: 1; }
 .icon-x { border: 0; background: var(--tile); color: var(--ink); width: 36px; height: 36px; border-radius: 999px; font-size: 20px; line-height: 1; cursor: pointer; flex: none; }
@@ -739,9 +739,6 @@ table.members tr.click:hover td:first-child b { text-decoration-color: var(--ink
 .pay-box { display: flex; flex-direction: column; gap: 12px; }
 .card .acts .btn[aria-pressed="true"] { background: var(--ink); color: var(--lime); }
 .icon-btn { min-width: 36px; padding-left: 0; padding-right: 0; justify-content: center; }
-.coll-list { max-height: 44vh; overflow: auto; scrollbar-width: none; }
-.coll-list::-webkit-scrollbar { display: none; }
-.coll-row { grid-template-columns: 44px minmax(0, 1fr) auto auto auto !important; align-items: center; gap: 12px; }
 .more-list { display: flex; flex-direction: column; gap: 8px; }
 .more-list .btn { justify-content: center; }
 .seg button:disabled { opacity: .35; cursor: default; }

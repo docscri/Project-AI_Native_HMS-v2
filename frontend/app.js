@@ -287,7 +287,7 @@ async function viewOps() {
         <div class="tile"><span class="label">Done</span><span class="big">${st.done}</span></div>
       </div>
       <div class="actions quick-actions"><button class="btn" data-a="book">New booking</button><button class="btn" data-a="walkin">Walk-in</button>
-        <button class="btn" data-a="register">New patient</button><button class="btn" data-a="schedules">Doctor schedules</button><button class="btn" data-a="collections">Collections</button></div>
+        <button class="btn" data-a="register">New patient</button><button class="btn" data-a="schedules">Doctor schedules</button></div>
       <div class="choices" style="gap:18px">
           <section class="panel"><span class="label">Doctors on ${S.date === TODAY ? "today" : niceDate(S.date)}</span>
             ${d.doctors.length ? `<div class="doctors">${d.doctors.map(doctorCard).join("")}</div>` : `<div class="empty">No doctors on this day</div>`}</section>
@@ -447,18 +447,6 @@ function openRefund(v) {
     ${reasonChips(REFUND_REASONS, "", "rf-reason")}
     <label class="field">Reason<input id="rf-why"></label>
     <div class="foot"><button class="btn" data-a="close">Back</button><button class="btn danger" data-a="refund-go">Refund</button></div>`);
-}
-async function openCollections() {
-  M = { kind: "collections" };
-  const d = await api(`/billing/day?date=${S.date}`), m = d.by_method;
-  const line = (v, amt, extra) => `<div class="r q coll-row"><span class="num muted">${v.receipt_no ? "#" + v.receipt_no : ""}</span><span class="who">${esc(v.patient_name)}</span><span class="muted">${extra}</span><b class="num">${amt}</b><button class="btn small" data-a="receipt" data-v="${v.id}">Receipt</button></div>`;
-  modal(`<h2>Collections · ${S.date === TODAY ? "Today" : niceDate(S.date)}</h2>
-    <div class="tiles-row"><div class="tk big"><small>Net</small><b>${rupees(d.net)}</b></div><div class="tk"><small>Cash</small><b>${rupees(m.cash)}</b></div><div class="tk"><small>UPI</small><b>${rupees(m.upi)}</b></div><div class="tk"><small>Card</small><b>${rupees(m.card)}</b></div></div>
-    <div class="tiles-row"><div class="tk"><small>Refunds</small><b>${rupees(d.refunded)}</b></div><div class="tk"><small>Discounts</small><b>${rupees(d.discounts)}</b></div><div class="tk"><small>Waived</small><b>${d.waived}</b></div></div>
-    <div class="rows coll-list">${d.payments.map(v => line(v, rupees(v.amount_paid), v.amount_paid ? (v.payment_method || "").toUpperCase() : "Waived")).join("")}
-      ${d.refunds.map(v => line(v, "−" + rupees(v.refund_amount), "Refund · " + esc(v.refund_reason || ""))).join("")}
-      ${d.payments.length || d.refunds.length ? "" : `<div class="empty">—</div>`}</div>
-    <div class="foot"><button class="btn" data-a="close">Close</button></div>`, true);
 }
 function openUpload(visitId) {
   M = { kind: "upload", visitId };
@@ -892,7 +880,6 @@ document.addEventListener("click", e => {
           ${vis.status === "waiting" && !vis.is_walk_in ? `<button class="btn" data-a="undo-arrival" data-v="${v}">Undo arrival</button>` : ""}
           ${vis.status === "booked" ? `<button class="btn" data-a="upload" data-v="${v}">Add document</button><button class="btn danger" data-a="cancel" data-v="${v}">Cancel booking</button>` : ""}</div>
           <div class="foot"><button class="btn" data-a="close">Back</button></div>`); break; }
-      case "collections": await openCollections(); break;
       case "refund": openRefund(Object.values(D.columns).flat().find(x => x.id === Number(v))); break;
       case "rf-reason": $("#rf-why").value = v; document.querySelectorAll('[data-a="rf-reason"]').forEach(b => b.setAttribute("aria-pressed", b.dataset.v === v)); break;
       case "refund-go": { const r = await api(`/visits/${M.v.id}/refund`, { body: { amount: Number($("#rf-amt").value) || null, reason: $("#rf-why").value } }); closeModal(); toast(`Refunded ${rupees(r.refund_amount)}`); refresh(); break; }

@@ -49,7 +49,7 @@ def test_leave_range_and_clinic_holiday():
         assert r["doctors"] == 1 and c.get("/api/availability", headers=h, params={"doctor_id": doc, "date": end}).json()["available"] is False
 
 
-def test_billing_discount_waiver_receipt_refund_and_collections():
+def test_billing_discount_waiver_receipt_refund():
     with TestClient(app) as c:
         h, doc = setup(c, "bill@x.in")
         v1 = c.post("/api/visits", headers=h, json={"patient_id": patient(c, h, "P1"), "doctor_id": doc, "date": TODAY}).json()
@@ -62,8 +62,6 @@ def test_billing_discount_waiver_receipt_refund_and_collections():
         assert c.post(f"/api/visits/{w2['id']}/refund", headers=h, json={"amount": 500, "reason": "Overcharged"}).status_code == 422
         r = c.post(f"/api/visits/{w2['id']}/refund", headers=h, json={"amount": 50, "reason": "Overcharged"}).json()
         assert r["refund_amount"] == 50
-        day = c.get("/api/billing/day", headers=h, params={"date": TODAY}).json()
-        assert day["by_method"] == {"cash": 200, "upi": 300, "card": 0} and day["refunded"] == 50 and day["net"] == 450 and day["waived"] == 1
         token = h["Authorization"].split()[1]
         page = c.get(f"/api/visits/{w2['id']}/receipt", params={"token": token})
         assert page.status_code == 200 and "Receipt #3" in page.text

@@ -1,5 +1,5 @@
 """Front desk: the day, doctor queues, booking, walk-in, arrival + payment, receipts, refunds, queue order,
-reschedule, cancel, no-show, and the day's collections."""
+reschedule, cancel, no-show, receipts and refunds."""
 import html
 from datetime import date as Date
 
@@ -376,19 +376,6 @@ def end_session(doctor_id: int, date: str, session: str | None = None, me=Depend
 
 
 # ---------- money ----------
-
-@router.get("/billing/day")
-def collections(date: str, me=Depends(front_desk), db=Depends(get_db)):
-    """Everything paid and refunded on a date, with totals by payment method."""
-    paid = visit_rows(db, me, "substr(v.paid_at, 1, 10) = ?", (date,))
-    refunds = visit_rows(db, me, "substr(v.refunded_at, 1, 10) = ? and v.refund_amount > 0", (date,))
-    by_method = {m: sum(v["amount_paid"] or 0 for v in paid if v["payment_method"] == m) for m in ("cash", "upi", "card")}
-    total = sum(by_method.values())
-    refunded = sum(v["refund_amount"] for v in refunds)
-    return {"date": date, "payments": paid, "refunds": refunds, "by_method": by_method,
-            "discounts": sum(v["discount"] or 0 for v in paid), "waived": sum(1 for v in paid if v["amount_paid"] == 0),
-            "total": total, "refunded": refunded, "net": total - refunded}
-
 
 def money(n) -> str:
     return f"₹{(n or 0):,}"
