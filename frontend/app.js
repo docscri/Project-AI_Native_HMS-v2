@@ -117,6 +117,8 @@ async function route() {
 
 function shell(active) {
   const m = S.me;
+  if ($("#view") && S.shellFor === active) return;   // same screen: keep the frame so the page doesn't flash or scroll
+  S.shellFor = active;
   $("#root").innerHTML = `<div class="app">
     <nav class="nav" aria-label="Main">
       <div class="brand"><b>Dictate</b><span>${esc(S.clinic.name)}</span></div>
@@ -125,7 +127,15 @@ function shell(active) {
     </nav>
     <div class="stage"><main class="surface" id="view"><div class="muted">Loading…</div></main></div></div>`;
 }
-const view = (html, g) => { if (g !== undefined && g !== S.gen) return; const v = $("#view"); if (v) v.innerHTML = html; };
+const pageKey = () => location.hash.replace(/^(#\/patients)\/\d+/, "$1");
+const view = (html, g) => {
+  if (g !== undefined && g !== S.gen) return;
+  const v = $("#view"); if (!v) return;
+  const same = S.viewKey === pageKey(), top = v.scrollTop;
+  v.innerHTML = html;
+  v.scrollTop = same ? top : 0;
+  S.viewKey = pageKey();
+};
 const stale = g => g !== S.gen;
 
 /* ---------- login / onboarding / invite ---------- */
@@ -603,7 +613,8 @@ async function viewConsult(visitId, doctorParam, patientParam) {
 }
 const refreshConsult = () => S.reloadConsult && run(S.reloadConsult);
 function renderConsult() {
-  const D = S.data, m = S.me, v = D.cur;
+  const D = S.data, m = S.me, v = D.cur, y = window.scrollY, again = S.cxShown === (v?.id ?? "p" + D.pid);
+  S.cxShown = v?.id ?? "p" + D.pid;
   const fe = $("#free-text"); if (fe && S.ft?.id === Number(fe.dataset.v)) { S.ft.sel = document.activeElement === fe ? fe.selectionEnd : null; S.ft.scroll = fe.scrollTop; }
   if (S.ft && S.ft.id !== v?.id) { saveText(S.ft.id); S.ft = null; }
   if (S.noteVisit !== v?.id) { S.noteVisit = v?.id; S.noteEdit = false; }
@@ -624,6 +635,7 @@ function renderConsult() {
       ${S.rightCollapsed ? "" : `<aside class="cx-right">${rightCol()}</aside>`}
     </div>
   </div>`;
+  if (again) { $(".cx")?.classList.add("re"); window.scrollTo(0, y); }
   restoreFree();
   clearTimeout(S.docT);
   if (v?.documents.some(d => d.ai_status === "processing")) S.docT = setTimeout(refreshConsult, 2000);
@@ -1089,7 +1101,7 @@ document.addEventListener("click", e => {
         const doc = S.me.kind === "doctor", role = $("#ac-role").value;
         const me = await api("/me", { method: "PUT", body: { name: $("#ac-name").value, email: $("#ac-email").value, phone: $("#ac-phone").value, speciality: doc ? role : "", designation: doc ? "" : role } });
         if (nw) await api("/auth/change-password", { body: { current: $("#ac-cur").value, new: nw } });
-        S.me = me; S.doctors = await api("/doctors"); closeModal(); toast("Saved"); route(); break; }
+        S.me = me; S.doctors = await api("/doctors"); S.shellFor = null; closeModal(); toast("Saved"); route(); break; }
       case "my-schedule": await openSchedules(S.me.id, true); break;
       case "pw-save": {
         if ($("#ac-new").value !== $("#ac-new2").value) return toast("New passwords don't match", true);
@@ -1159,7 +1171,8 @@ document.addEventListener("click", e => {
       case "undo-arrival": { closeModal(); const r = await api(`/visits/${v}/undo-arrival`, { body: {} }); toast(`${r.patient_name} back to Booked${r.refund_amount ? " · refund " + rupees(r.refund_amount) : ""}`); refresh(); break; }
       case "bk-session": M.session = v; M.token = null; await loadAvail(); break;
       case "bk-reason": M.reason = v; renderBooking(); break;
-      case "vf-st": S.vf.st = v; route(); break;
+      case "vf-st": S.vf.st = v; document.querySelectorAll('[data-a="vf-st"]').forEach(b => b.setAttribute("aria-pressed", b.dataset.v === v));
+        { const r = $("#ops-rows"); if (r && S.data?.visits) r.innerHTML = opsRows(S.data.visits); } break;
       case "cancel": { const vis = D.columns.booked.find(x => x.id === Number(v)); M = { kind: "cancel", id: v, reason: "" };
         modal(`<h2>Cancel booking · ${esc(vis.patient_name)}</h2>${reasonChips(CANCEL_REASONS, "", "cn-reason")}<div class="foot"><button class="btn" data-a="close">Back</button><button class="btn danger" data-a="cancel-go" data-v="${v}">Cancel booking</button></div>`); break; }
       case "cn-reason": M.reason = v; document.querySelectorAll('[data-a="cn-reason"]').forEach(b => b.setAttribute("aria-pressed", b.dataset.v === v)); break;
@@ -1206,7 +1219,7 @@ document.addEventListener("click", e => {
       case "att-in": case "att-out": await api(`/attendance/check-${a === "att-in" ? "in" : "out"}`, { body: {} }); toast(a === "att-in" ? "Checked in" : "Checked out"); openAccount(); break;
       case "my-leave": openLeave({ self: true }); break;
       case "mb-schedule": closeModal(); await openSchedules(Number(v)); break;
-      case "ad-details": S.clinic = await api("/clinic", { method: "PUT", body: { name: $("#ad-name").value, phone: $("#ad-phone").value, address: $("#ad-addr").value } }); toast("Saved"); route(); break;
+      case "ad-details": S.shellFor = null; S.clinic = await api("/clinic", { method: "PUT", body: { name: $("#ad-name").value, phone: $("#ad-phone").value, address: $("#ad-addr").value } }); toast("Saved"); route(); break;
       case "ad-rules": S.clinic = await api("/clinic/rules", { method: "PUT", body: readRules("ad") }); toast("Rules saved."); route(); break;
       case "pt-open": go(`#/patients/${v}`); break;
       case "pt-edit": openPatientEdit(await api(`/patients/${v}`)); break;
