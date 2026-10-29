@@ -498,13 +498,13 @@ function renderSched() {
     <div class="cal">${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(d => `<span class="dow">${d}</span>`).join("")}${"<span></span>".repeat(lead)}
       ${s.days.map(d => `<button class="${d.off ? "off" : ""} ${d.override ? "ovr" : ""}" data-a="sc-day" data-v="${d.date}" aria-pressed="${d.date === s.sel}" ${d.date < TODAY ? "disabled" : ""}><b>${Number(d.date.slice(8))}</b>${d.off ? "Off" : `${d.schedule.start}–${d.schedule.end}`}</button>`).join("")}</div>
     ${s.leave ? leaveEditor() : editor}
-    <div class="foot">${s.leave ? "" : `<button class="btn" data-a="lv-open" data-v="doc">${s.own ? "Leave" : "Doctor off"}</button>${S.me.is_admin && !s.own ? `<button class="btn" data-a="lv-open" data-v="all">Clinic holiday</button>` : ""}`}<button class="btn" data-a="close-refresh">Close</button></div>`, true);
+    <div class="foot">${s.leave ? "" : `<button class="btn" data-a="lv-open" data-v="doc">Leave</button>${S.me.is_admin && !s.own ? `<button class="btn" data-a="lv-open" data-v="all">Clinic holiday</button>` : ""}`}<button class="btn" data-a="close-refresh">Close</button></div>`, true);
 }
 function leaveEditor() {
   const l = M.leave;
-  return `<div class="hit choices"><h3>${l.all ? "Clinic holiday" : `${esc(S.doctors.find(d => d.id === M.doctorId)?.name || "Doctor")} · Off`}</h3>
+  return `<div class="hit choices"><h3>${l.all ? "Clinic holiday" : `${esc(S.doctors.find(d => d.id === M.doctorId)?.name || "Doctor")} · Leave`}</h3>
     <div class="grid2"><label class="field">From<input type="date" id="lv-from" min="${TODAY}" value="${l.from}"></label><label class="field">To<input type="date" id="lv-to" min="${TODAY}" value="${l.to}"></label></div>
-    <div class="foot"><button class="btn" data-a="lv-back">Back</button><button class="btn" data-a="lv-save" data-v="0">Working</button><button class="btn primary" data-a="lv-save" data-v="1">Off</button></div></div>`;
+    <div class="foot"><button class="btn" data-a="lv-back">Back</button><button class="btn" data-a="lv-save" data-v="0">Working</button><button class="btn primary" data-a="lv-save" data-v="1">${l.all ? "Holiday" : "Leave"}</button></div></div>`;
 }
 
 /* members */
@@ -1040,7 +1040,7 @@ document.addEventListener("click", e => {
       case "lv-back": M.leave = null; renderSched(); break;
       case "lv-save": { const l = M.leave, from = $("#lv-from").value, to = $("#lv-to").value || from;
         const r = await api("/schedules/leave", { body: { start_date: from, end_date: to, doctor_id: l.all ? null : M.doctorId, off: v === "1" } });
-        toast(`${r.days} day${r.days > 1 ? "s" : ""} ${v === "1" ? "off" : "working"}${r.bookings_affected ? ` · ${r.bookings_affected} booking${r.bookings_affected > 1 ? "s" : ""} to move` : ""}`, r.bookings_affected > 0);
+        toast(`${r.days} day${r.days > 1 ? "s" : ""} ${v === "1" ? (M.leave.all ? "holiday" : "leave") : "working"}${r.bookings_affected ? ` · ${r.bookings_affected} booking${r.bookings_affected > 1 ? "s" : ""} to move` : ""}`, r.bookings_affected > 0);
         M.leave = null; await loadMonth(); break; }
       case "upload": openUpload(Number(v)); break;
       case "upload-go": { const f = $("#up-file").files[0]; if (!f) return toast("Choose a file first", true); await doUpload(M.visitId, f); closeModal(); location.hash.startsWith("#/consult") ? refreshConsult() : refresh(); break; }
