@@ -498,7 +498,7 @@ function renderSched() {
     <div class="cal">${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(d => `<span class="dow">${d}</span>`).join("")}${"<span></span>".repeat(lead)}
       ${s.days.map(d => `<button class="${d.off ? "off" : ""} ${d.override ? "ovr" : ""}" data-a="sc-day" data-v="${d.date}" aria-pressed="${d.date === s.sel}" ${d.date < TODAY ? "disabled" : ""}><b>${Number(d.date.slice(8))}</b>${d.off ? "Off" : `${d.schedule.start}–${d.schedule.end}`}</button>`).join("")}</div>
     ${s.leave ? leaveEditor() : editor}
-    <div class="foot">${s.leave ? "" : `<button class="btn" data-a="lv-open" data-v="doc">${s.own ? "Days off" : "Doctor off"}</button>${S.me.is_admin && !s.own ? `<button class="btn" data-a="lv-open" data-v="all">Clinic holiday</button>` : ""}`}<button class="btn" data-a="close-refresh">Close</button></div>`, true);
+    <div class="foot">${s.leave ? "" : `<button class="btn" data-a="lv-open" data-v="doc">${s.own ? "Leave" : "Doctor off"}</button>${S.me.is_admin && !s.own ? `<button class="btn" data-a="lv-open" data-v="all">Clinic holiday</button>` : ""}`}<button class="btn" data-a="close-refresh">Close</button></div>`, true);
 }
 function leaveEditor() {
   const l = M.leave;
