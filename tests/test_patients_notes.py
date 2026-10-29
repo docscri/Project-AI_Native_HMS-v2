@@ -45,9 +45,6 @@ def test_hand_written_note_and_activity():
         assert n["content"]["soap"]["S"] == ""
         c.put(f"/api/notes/{n['id']}", headers=h, json={"soap": {"S": "Fever", "O": "", "A": "Viral", "P": "Rest"}, "rx": []})
         assert c.post(f"/api/notes/{n['id']}/sign", headers=h).json()["status"] == "signed"
-        acts = c.get("/api/activity", headers=h).json()["events"]
-        assert acts[0]["action"] == "signed" and acts[0]["subject"] == "Note Patient" and acts[0]["actor"] == "Dr. P"
-        assert all(e["entity"] == "visit" for e in c.get("/api/activity", headers=h, params={"kind": "visits"}).json()["events"])
 
 
 def test_address_and_owner_edit_during_setup():

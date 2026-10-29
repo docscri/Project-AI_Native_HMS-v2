@@ -805,3 +805,6 @@ table.members tr.click:hover td:first-child b { text-decoration-color: var(--ink
 .acts-row .btn { flex: 1; justify-content: center; }
 .acts-row .btn.icon-btn { flex: none; }
 .board .card .acts .acts-row .btn.dark { flex: 1; }
+.modal.re, .modal.re * { animation: none !important; }
+.save-row { display: flex; justify-content: flex-end; margin-top: 4px; }
+.scrim:has(.modal.re) { animation: none; }

@@ -69,7 +69,9 @@ function toast(msg, err) {
 }
 async function run(fn) { try { return await fn(); } catch (e) { toast(e.message, true); } }
 function modal(html, wide) {
-  $("#modal").innerHTML = html ? `<div class="scrim" data-a="scrim"><div class="modal ${wide ? "wide" : ""}" role="dialog" aria-modal="true">${html}</div></div>` : "";
+  const old = $("#modal .modal"), top = old ? old.scrollTop : 0, scrim = $("#modal .scrim")?.scrollTop || 0;
+  $("#modal").innerHTML = html ? `<div class="scrim" data-a="scrim"><div class="modal ${wide ? "wide" : ""} ${old ? "re" : ""}" role="dialog" aria-modal="true">${html}</div></div>` : "";
+  if (html && old) { $("#modal .modal").scrollTop = top; $("#modal .scrim").scrollTop = scrim; }
 }
 const closeModal = () => { modal(""); M = null; };
 const go = h => { if (location.hash === h) route(); else location.hash = h; };
@@ -496,7 +498,7 @@ function renderSched() {
     editor = `<div class="hit choices"><div class="actions" style="justify-content:space-between;align-items:center"><h3>${niceDate(sel.date)}</h3>${sel.override ? `<span class="pill s-with_doctor">Changed</span>` : `<span class="pill s-soft">Clinic hours</span>`}</div>
       <div class="seg"><button data-a="sc-off" data-v="0" aria-pressed="${!sel.off}">Working</button><button data-a="sc-off" data-v="1" aria-pressed="${sel.off}">Off</button></div>
       <div id="so-lim" class="choices" ${sel.off ? 'style="opacity:.35;pointer-events:none"' : ""}>${limitBlock("so", base)}</div>
-      <div class="foot"><button class="btn" data-a="sc-reset" ${sel.override ? "" : "disabled"}>Back to clinic hours</button><button class="btn primary" data-a="sc-save">Save day</button></div></div>`;
+      <div class="foot"><button class="btn" data-a="sc-reset" ${sel.override ? "" : "disabled"}>Default</button><button class="btn primary" data-a="sc-save">Save</button></div></div>`;
   }
   modal(`<div class="actions" style="justify-content:space-between;align-items:center"><h2>Doctor schedules</h2>
       <select class="input" style="width:auto" id="sc-doc" data-a="sc-doc">${S.doctors.map(d => `<option value="${d.id}" ${d.id === s.doctorId ? "selected" : ""}>${esc(d.name)}</option>`).join("")}</select></div>
@@ -797,13 +799,13 @@ function openPatientEdit(p) {
 async function viewAdmin(tab) {
   const g = S.gen;
   const editable = S.me.is_admin;
-  const tabs = [["clinic", "Clinic details"], ["rules", "Clinic rules"], ["members", "Members"], ...(editable ? [["activity", "Activity"]] : [])];
+  const tabs = [["clinic", "Clinic details"], ["rules", "Clinic rules"], ["members", "Members"]];
   let body = "";
   if (tab === "clinic") body = `<section class="panel" style="max-width:640px"><label class="field">Clinic name<input id="ad-name" value="${esc(S.clinic.name)}"></label>
     <label class="field">Phone<input id="ad-phone" value="${esc(S.clinic.phone)}"></label><label class="field">Address<input id="ad-addr" value="${esc(S.clinic.address)}"></label>
-        ${editable ? `<div><button class="btn primary" data-a="ad-details">Save</button></div>` : ""}</section>`;
+        ${editable ? `<div class="save-row"><button class="btn primary" data-a="ad-details">Save</button></div>` : ""}</section>`;
   if (tab === "rules") body = `<section class="panel" style="max-width:700px">${rulesForm("ad", S.clinic)}
-    ${editable ? `<div><button class="btn primary" data-a="ad-rules">Save rules</button></div>` : ""}</section>`;
+    ${editable ? `<div class="save-row"><button class="btn primary" data-a="ad-rules">Save</button></div>` : ""}</section>`;
   if (tab === "members") {
     const ms = await api("/members");
     body = `<section class="panel scroll"><table class="t members"><thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Role</th><th>Department</th><th>Status</th></tr></thead><tbody>
@@ -816,37 +818,10 @@ async function viewAdmin(tab) {
     </tbody></table></section>${editable ? `<div class="actions"><button class="btn primary" data-a="member-add" data-v="doctor">Add doctor</button><button class="btn" data-a="member-add" data-v="staff">Add staff</button></div>` : ""}`;
     S.members = ms;
   }
-  if (tab === "activity" && editable) {
-    S.act = S.act || { kind: "", events: [], more: false };
-    const r = await api(`/activity?kind=${S.act.kind}`); S.act.events = r.events; S.act.more = r.more;
-    body = `<div class="seg act-seg">${ACT_KINDS.map(([k, l]) => `<button data-a="act-kind" data-v="${k}" aria-pressed="${k === S.act.kind}">${l}</button>`).join("")}</div>
-      <section class="panel"><div class="rows" id="act-rows">${actRows(S.act.events)}</div>${S.act.more ? `<div><button class="btn small" data-a="act-more">More</button></div>` : ""}</section>`;
-  }
   if (stale(g)) return;
   view(`<div class="head"><div><h1>Administration</h1></div></div>
     <div class="actions admin-tabs">${tabs.map(([k, l]) => `<button class="btn" data-a="ad-tab" data-v="${k}" aria-pressed="${k === tab}">${l}</button>`).join("")}</div>${body}`);
 }
-
-const ACT_KINDS = [["", "All"], ["visits", "Visits"], ["patients", "Patients"], ["notes", "Notes"], ["schedules", "Schedules"], ["team", "Team"]];
-const ACT = { booked: "Booked", walk_in: "Walk-in", waiting: "Arrived", with_doctor: "Consultation started", done: "Visit completed", no_show: "No-show", cancelled: "Cancelled",
-  booked_again: "Arrival undone", rescheduled: "Rescheduled", refunded: "Refunded", queue_moved: "Moved in queue", late_on: "Marked late", late_off: "Late cleared",
-  registered: "Registered", edited: "Details edited", merged: "Records merged", drafted: "Note drafted", started: "Note started", signed: "Note signed", uploaded: "Document added",
-  day_changed: "Day changed", leave: "Leave", leave_cleared: "Leave cleared", invited: "Invited", joined: "Joined", logged_in: "Logged in", password_changed: "Password changed",
-  password_reset: "Password reset", reset_link_created: "Reset link made", updated: "Details edited", deactivated: "Set inactive", created: "Clinic created",
-  details_updated: "Clinic details saved", rules_updated: "Clinic rules saved" };
-function actDetail(e) {
-  const d = e.data || {};
-  if (e.action === "refunded") return `${rupees(d.amount)} · ${esc(d.reason || "")}`;
-  if (e.action === "cancelled" && d.cancel_reason) return esc(d.cancel_reason);
-  if (e.action === "rescheduled") return `${niceDate(d.from)} → ${niceDate(d.to)}${d.reason ? " · " + esc(d.reason) : ""}`;
-  if (e.action === "waiting" && d.amount_paid != null) return `${rupees(d.amount_paid)}${d.payment_method ? " · " + d.payment_method.toUpperCase() : ""}${d.discount ? ` · −${rupees(d.discount)} ${esc(d.discount_reason || "")}` : ""}`;
-  if (e.action === "leave" || e.action === "leave_cleared") return `${niceDate(d.from)} – ${niceDate(d.to)}${d.all_doctors ? " · Clinic holiday" : ""}`;
-  if (e.action === "day_changed") return d.date ? niceDate(d.date) + (d.is_off ? " · Off" : "") : "";
-  if (e.action === "merged") return `${esc(d.name || "")} ${esc(d.removed || "")}`;
-  return "";
-}
-const actRows = evs => evs.map(e => `<div class="r act-row"><span class="num muted">${esc((e.at || "").slice(5, 16).replace("T", " "))}</span>
-  <span class="who"><b>${e.action === "booked" && e.data?.refund_reason ? "Arrival undone" : ACT[e.action] || esc(e.action)}</b>${e.subject ? " · " + esc(e.subject) : ""}</span><span class="muted">${actDetail(e)}</span><span class="muted">${esc(e.actor || "—")}</span></div>`).join("") || `<div class="empty">—</div>`;
 
 /* ---------- events ---------- */
 document.addEventListener("click", e => {
@@ -987,9 +962,6 @@ document.addEventListener("click", e => {
       case "dict-add": { const i = $("#dict-in"); await addLine(Number(v), i.value); break; }
       case "rx-add": { const n = D.cur.note; n.content = readNote(); n.content.rx.push({ medicine: "", dose: "", duration: "", instructions: "" }); rerenderNote(); break; }
       case "rx-del": { const n = D.cur.note; n.content = readNote(); n.content.rx.splice(Number(v), 1); rerenderNote(); break; }
-      case "act-kind": S.act.kind = v; route(); break;
-      case "act-more": { const r = await api(`/activity?kind=${S.act.kind}&before=${S.act.events[S.act.events.length - 1].id}`); S.act.events.push(...r.events); S.act.more = r.more;
-        $("#act-rows").innerHTML = actRows(S.act.events); if (!r.more) t.remove(); break; }
       case "note-blank": await api(`/visits/${v}/note`, { body: {} }); refreshConsult(); break;
       case "note-save": await api(`/notes/${v}`, { method: "PUT", body: readNote() }); toast("Draft saved"); refreshConsult(); break;
       case "note-sign": await api(`/notes/${v}`, { method: "PUT", body: readNote() }); await api(`/notes/${v}/sign`, { body: {} }); toast("Signed. Visit complete."); refreshConsult(); break;
