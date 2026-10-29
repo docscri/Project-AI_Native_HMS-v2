@@ -112,7 +112,7 @@ async function route() {
   if (parts[0] === "ops") return parts[1] === "doctor" ? viewQueue(Number(parts[2])) : viewOps();
   if (parts[0] === "patients") return viewPatients(parts[1] ? Number(parts[1]) : null);
   if (parts[0] === "consult") return viewConsult(parts[1] ? Number(parts[1]) : null, q.get("doctor"), q.get("patient"));
-  if (parts[0] === "admin") return viewAdmin(parts[1] || "clinic");
+  if (parts[0] === "admin") return viewAdmin(parts[1] === "members" ? "team" : parts[1] || "clinic", parts[2]);
 }
 
 function shell(active) {
@@ -521,11 +521,15 @@ function openMember(kind, m) {
         : `<label class="field">Designation<select id="mb-spec">${["Receptionist", "Nurse", "IT", "Other"].map(d => `<option ${m?.designation === d ? "selected" : ""}>${d}</option>`).join("")}</select></label>`}</div>
     ${k === "doctor" ? `<div class="fee-row"><div class="seg"><button data-a="mb-fee-mode" data-v="clinic" aria-pressed="${m?.fee_override == null}">Clinic fee ₹${S.clinic.fee}</button><button data-a="mb-fee-mode" data-v="own" aria-pressed="${m?.fee_override != null}">Own fee</button></div>
       <label class="field" id="mb-fee-wrap" ${m?.fee_override == null ? "hidden" : ""}>Fee (₹)<input id="mb-fee" type="number" min="0" value="${m?.fee_override ?? S.clinic.fee}"></label></div>` : ""}
+    ${m ? `<div class="grid2"><label class="field">Joining date<input type="date" id="mb-joined" value="${esc(m.joined_on || "")}"></label><label class="field">ID number<input id="mb-idno" value="${esc(m.id_number || "")}"></label></div>
+    <div class="grid2"><label class="field">Emergency contact<input id="mb-emerg" value="${esc(m.emergency_contact || "")}"></label><label class="field">Address<input id="mb-addr" value="${esc(m.address || "")}"></label></div>
+    ${k === "staff" ? `<div class="rule-group"><span class="rule-label">Working days</span><div class="day-dots">${["S", "M", "T", "W", "T", "F", "S"].map((d, i) => `<label><input type="checkbox" id="mb-d${i}" ${(m.work_days ? JSON.parse(m.work_days) : S.clinic.days).includes(i) ? "checked" : ""}><span>${d}</span></label>`).join("")}</div></div>
+      <div class="grid2"><label class="field">Starts<input type="time" id="mb-ws" value="${esc(m.work_start || S.clinic.start || "09:00")}"></label><label class="field">Ends<input type="time" id="mb-we" value="${esc(m.work_end || S.clinic.end || "17:00")}"></label></div>` : ""}` : ""}
     <div class="field">Screens</div>
     <div class="days">${SCREENS.map(([key, , l]) => `<label><input type="checkbox" id="mb-s-${key}" ${screens.includes(key) || locked ? "checked" : ""} ${locked ? "disabled" : ""}>${l}</label>`).join("")}</div>
     <div class="toggles"><label class="choice"><input type="checkbox" id="mb-admin" ${m?.is_admin ? "checked" : ""} ${locked ? "disabled" : ""}><span><b>Admin access</b></span></label>
     ${m && !m.is_owner && m.status !== "invited" ? `<label class="choice"><input type="checkbox" id="mb-active" ${m.status === "active" ? "checked" : ""}><span><b>Active</b></span></label>` : ""}</div>
-    <div class="foot">${m && !m.is_owner ? `<button class="btn danger" data-a="mb-remove" style="margin-right:auto">Remove</button>` : ""}${m?.status === "invited" ? `<button class="btn" data-a="renew-invite" data-v="${m.id}">Copy invite link</button>` : ""}${m?.status === "active" && !m.is_owner ? `<button class="btn" data-a="reset-link" data-v="${m.id}">Password reset link</button>` : ""}
+    <div class="foot">${m && !m.is_owner ? `<button class="btn danger" data-a="mb-remove" style="margin-right:auto">Remove</button>` : ""}${m?.status === "invited" ? `<button class="btn" data-a="renew-invite" data-v="${m.id}">Copy invite link</button>` : ""}${m?.status === "active" && !m.is_owner ? `<button class="btn" data-a="reset-link" data-v="${m.id}">Password reset link</button>` : ""}${m && k === "doctor" ? `<button class="btn" data-a="mb-schedule" data-v="${m.id}">Schedule</button>` : ""}
       <button class="btn" data-a="close">Cancel</button><button class="btn primary" data-a="mb-save">${m ? "Save" : "Send invitation"}</button></div>`);
 }
 async function saveMember() {
@@ -538,6 +542,8 @@ async function saveMember() {
     if (mkind === "doctor" && !own) body.clear_fee = true;
     if (m.is_owner) { delete body.screens; delete body.is_admin; }
     if ($("#mb-active")) body.status = $("#mb-active").checked ? "active" : "inactive";
+    Object.assign(body, { joined_on: $("#mb-joined").value || null, id_number: $("#mb-idno").value, emergency_contact: $("#mb-emerg").value, address: $("#mb-addr").value });
+    if (mkind === "staff") Object.assign(body, { work_days: [0, 1, 2, 3, 4, 5, 6].filter(i => $("#mb-d" + i).checked), work_start: $("#mb-ws").value, work_end: $("#mb-we").value });
     await api(`/members/${m.id}`, { method: "PATCH", body });
     toast("Saved");
   } else {
@@ -550,14 +556,19 @@ async function saveMember() {
 function copyLink(link, msg) {
   navigator.clipboard?.writeText(link).then(() => toast(msg), () => { M = { kind: "link" }; modal(`<h2>Share this link</h2><label class="field">Link<input readonly value="${esc(link)}" onfocus="this.select()"></label><div class="foot"><button class="btn primary" data-a="close">Done</button></div>`); });
 }
-function openAccount() {
-  const m = S.me, doc = m.kind === "doctor"; M = { kind: "account" };
-  modal(`<div class="mb-head"><div class="avatar big">${esc(initials(m.name))}</div><div><h2>${esc(m.name)}</h2><span class="muted">${esc(doc ? m.speciality || "Doctor" : m.designation || "Staff")}</span></div></div>
+async function openAccount() {
+  const m = S.me, doc = m.kind === "doctor";
+  const [att, myLeave] = await Promise.all([api("/attendance/me").catch(() => ({})), api("/leave?mine=true").catch(() => [])]);
+  M = { kind: "account" };
+  const upcoming = myLeave.filter(l => l.end_date >= TODAY && ["pending", "approved"].includes(l.status));
+  modal(`<div class="mb-head"><div class="avatar big">${esc(initials(m.name))}</div><div><h2>${esc(m.name)}</h2><span class="muted">${esc(doc ? m.speciality || "Doctor" : m.designation || "Staff")}</span></div>
+      <span class="grow"></span>${att.check_out ? `<span class="pill s-paid">${hhmm(att.check_in)} – ${hhmm(att.check_out)}</span>` : att.check_in ? `<button class="btn small" data-a="att-out">Check out · in ${hhmm(att.check_in)}</button>` : `<button class="btn small dark" data-a="att-in">Check in</button>`}</div>
+    ${upcoming.length ? `<div class="rows my-leave">${upcoming.map(l => `<div class="r my-leave-row"><span class="num">${niceDate(l.start_date)}${l.end_date !== l.start_date ? " – " + niceDate(l.end_date) : ""}</span><span class="who muted">${(LEAVE_TYPES.find(t => t[0] === l.type) || [, l.type])[1]}</span><span class="actions" style="gap:6px"><span class="pill ${LEAVE_ST[l.status][1]}">${LEAVE_ST[l.status][0]}</span><button class="btn small icon-btn" data-a="lv-cancel" data-v="${l.id}" aria-label="Cancel leave">×</button></span></div>`).join("")}</div>` : ""}
     <div class="grid2"><label class="field">Name<input id="ac-name" value="${esc(m.name)}"></label><label class="field">${doc ? "Speciality" : "Designation"}<input id="ac-role" value="${esc((doc ? m.speciality : m.designation) || "")}"></label></div>
     <div class="grid2"><label class="field">Email<input id="ac-email" type="email" value="${esc(m.email)}"></label><label class="field">Phone<input id="ac-phone" value="${esc(m.phone || "")}"></label></div>
     <label class="field">Current password<input id="ac-cur" type="password" autocomplete="current-password"></label>
     <div class="grid2"><label class="field">New password<input id="ac-new" type="password" autocomplete="new-password"></label><label class="field">Repeat new password<input id="ac-new2" type="password" autocomplete="new-password"></label></div>
-    <div class="foot"><button class="btn danger" data-a="logout" style="margin-right:auto">Log out</button>${doc ? `<button class="btn" data-a="my-schedule">My schedule</button>` : ""}<button class="btn" data-a="close">Close</button><button class="btn primary" data-a="ac-save">Save</button></div>`);
+    <div class="foot"><button class="btn danger" data-a="logout" style="margin-right:auto">Log out</button><button class="btn" data-a="my-leave">Leave</button>${doc ? `<button class="btn" data-a="my-schedule">My schedule</button>` : ""}<button class="btn" data-a="close">Close</button><button class="btn primary" data-a="ac-save">Save</button></div>`);
 }
 function copyInvite(code, msg) {
   const link = `${location.origin}/#/invite/${code}`;
@@ -905,17 +916,19 @@ function openPatientEdit(p) {
 }
 
 /* ---------- administration ---------- */
-async function viewAdmin(tab) {
+async function viewAdmin(tab, sub) {
   const g = S.gen;
   const editable = S.me.is_admin;
-  const tabs = [["clinic", "Clinic details"], ["rules", "Clinic rules"], ["members", "Members"]];
+  const tabs = [["clinic", "Clinic details"], ["rules", "Clinic rules"], ["team", "Team"], ...(editable ? [["money", "Collections"]] : [])];
   let body = "";
   if (tab === "clinic") body = `<section class="panel" style="max-width:640px"><label class="field">Clinic name<input id="ad-name" value="${esc(S.clinic.name)}"></label>
     <label class="field">Phone<input id="ad-phone" value="${esc(S.clinic.phone)}"></label><label class="field">Address<input id="ad-addr" value="${esc(S.clinic.address)}"></label>
         ${editable ? `<div class="save-row"><button class="btn primary" data-a="ad-details">Save</button></div>` : ""}</section>`;
   if (tab === "rules") body = `<section class="panel" style="max-width:700px">${rulesForm("ad", S.clinic)}
     ${editable ? `<div class="save-row"><button class="btn primary" data-a="ad-rules">Save</button></div>` : ""}</section>`;
-  if (tab === "members") {
+  if (tab === "team" && editable && sub && sub !== "members") body = await teamView(sub);
+  else if (tab === "money" && editable) body = await moneyView(sub || "today");
+  else if (tab === "team") {
     const ms = await api("/members");
     body = `<section class="panel scroll"><table class="t members"><thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Role</th><th>Department</th><th>Status</th></tr></thead><tbody>
       ${ms.map(m => `<tr class="${editable ? "click" : ""}" ${editable ? `data-a="member-edit" data-v="${m.id}"` : ""}>
@@ -925,6 +938,7 @@ async function viewAdmin(tab) {
         <td>${esc((m.kind === "doctor" ? m.speciality : m.designation) || "—")}</td>
         <td><span class="pill ${m.status === "active" ? "s-paid" : m.status === "invited" ? "s-waiting" : "s-no_show"}">${{ active: "Active", invited: "Invited", inactive: "Inactive" }[m.status]}</span></td></tr>`).join("")}
     </tbody></table></section>${editable ? `<div class="actions"><button class="btn primary" data-a="member-add" data-v="doctor">Add doctor</button><button class="btn" data-a="member-add" data-v="staff">Add staff</button></div>` : ""}`;
+    if (editable) body = subTabs("team", "members") + body;
     S.members = ms;
   }
   if (stale(g)) return;
@@ -932,12 +946,99 @@ async function viewAdmin(tab) {
     <div class="actions admin-tabs">${tabs.map(([k, l]) => `<button class="btn" data-a="ad-tab" data-v="${k}" aria-pressed="${k === tab}">${l}</button>`).join("")}</div>${body}`);
 }
 
+/* ---------- administration: team & collections ---------- */
+const TEAM_TABS = [["members", "Members"], ["today", "Today"], ["leave", "Leave"], ["register", "Register"]];
+const MONEY_TABS = [["today", "Today"], ["range", "Range"], ["close", "Day close"]];
+const subTabs = (tab, cur) => `<div class="seg sub-seg">${(tab === "team" ? TEAM_TABS : MONEY_TABS).map(([k, l]) => `<button data-a="ad-sub" data-t="${tab}" data-v="${k}" aria-pressed="${k === cur}">${l}</button>`).join("")}</div>`;
+const ATT = { present: ["Present", "s-paid"], late: ["Late", "s-waiting"], half: ["Half day", "s-waiting"], absent: ["Absent", "s-no_show"], leave: ["Leave", "s-soft"], off: ["Off", "s-soft"], due: ["Not in yet", "s-booked"] };
+const LEAVE_TYPES = [["casual", "Casual"], ["sick", "Sick"], ["earned", "Earned"], ["other", "Other"]];
+const LEAVE_ST = { pending: ["Pending", "s-waiting"], approved: ["Approved", "s-paid"], rejected: ["Rejected", "s-no_show"], cancelled: ["Cancelled", "s-cancelled"] };
+const hhmm = ts => ts ? ts.slice(11, 16) : "—";
+const roleOf = m => m.kind === "doctor" ? (m.speciality || "Doctor") : (m.designation || "Staff");
+const monthPick = (a, ym) => { const [y, m] = ym.split("-").map(Number); return `<div class="month-picker"><span>Month</span><select data-a="${a}-m" aria-label="Month">${Array.from({ length: 12 }, (_, i) => `<option value="${i + 1}" ${i + 1 === m ? "selected" : ""}>${new Date(2000, i, 1).toLocaleDateString("en-IN", { month: "long" })}</option>`).join("")}</select><select data-a="${a}-y" aria-label="Year">${Array.from({ length: 6 }, (_, i) => new Date().getFullYear() - 4 + i).map(n => `<option ${n === y ? "selected" : ""}>${n}</option>`).join("")}</select></div>`; };
+const person = m => `<span class="mname"><span class="avatar sm">${esc(initials(m.name))}</span><span class="pname"><b>${esc(m.name)}</b><small>${esc(m.role ?? roleOf(m))}</small></span></span>`;
+
+async function teamView(sub) {
+  S.adm = S.adm || { month: TODAY.slice(0, 7) };
+  if (sub === "today") {
+    const t = await api("/team/today");
+    return `${subTabs("team", "today")}<section class="panel"><span class="label">${niceDate(t.date)}</span><div class="rows">${t.people.map(p => {
+      const [l, c] = ATT[p.status] || [p.status, "s-soft"];
+      const edit = p.status === "leave" || !p.working && p.status === "off" ? "" : `<div class="seg mini">${[["present", "Present"], ["late", "Late"], ["absent", "Absent"]].map(([k, x]) => `<button data-a="att-mark" data-m="${p.id}" data-v="${k}" aria-pressed="${p.status === k}">${x}</button>`).join("")}</div>`;
+      return `<div class="r team-row">${person(p)}<span class="pill ${c}">${l}</span><span class="muted num">${p.check_in ? hhmm(p.check_in) + (p.check_out ? " – " + hhmm(p.check_out) : "") : p.working && p.start ? "from " + p.start : ""}</span>${edit}</div>`;
+    }).join("") || `<div class="empty">—</div>`}</div></section>`;
+  }
+  if (sub === "leave") {
+    const ls = await api(`/leave?month=${S.adm.month}`), pend = ls.filter(l => l.status === "pending"), rest = ls.filter(l => l.status !== "pending");
+    const line = l => { const [st, c] = LEAVE_ST[l.status]; return `<div class="r leave-row">${person({ ...l, role: (LEAVE_TYPES.find(t => t[0] === l.type) || [, l.type])[1] + (l.reason ? " · " + l.reason : "") })}
+      <span class="num">${niceDate(l.start_date)}${l.end_date !== l.start_date ? " – " + niceDate(l.end_date) : ""}</span><span class="muted">${l.days} day${l.days > 1 ? "s" : ""}</span>
+      <span class="actions" style="gap:6px;justify-content:flex-end">${l.status === "pending" ? `<button class="btn small dark" data-a="lv-approve" data-v="${l.id}">Approve</button><button class="btn small" data-a="lv-reject" data-v="${l.id}">Reject</button>` : `<span class="pill ${c}">${st}</span>${l.status === "approved" && l.end_date >= TODAY ? `<button class="btn small icon-btn" data-a="lv-cancel" data-v="${l.id}" aria-label="Cancel leave">×</button>` : ""}`}</span></div>`; };
+    return `${subTabs("team", "leave")}<div class="bar-row">${monthPick("lvm", S.adm.month)}<span class="grow"></span><button class="btn primary" data-a="lv-new">+ Leave</button></div>
+      ${pend.length ? `<section class="panel"><span class="label">Waiting for approval</span><div class="rows">${pend.map(line).join("")}</div></section>` : ""}
+      <section class="panel"><span class="label">${new Date(S.adm.month + "-01T00:00").toLocaleDateString("en-IN", { month: "long", year: "numeric" })}</span><div class="rows">${rest.map(line).join("") || `<div class="empty">—</div>`}</div></section>`;
+  }
+  if (sub === "register") {
+    const r = await api(`/team/register?month=${S.adm.month}`);
+    S.reg = r;
+    return `${subTabs("team", "register")}<div class="bar-row">${monthPick("rgm", S.adm.month)}<span class="grow"></span><button class="btn" data-a="reg-print">Print</button></div>
+      <section class="panel scroll"><table class="t"><thead><tr><th>Name</th><th>Working days</th><th>Present</th><th>Late</th><th>Leave</th><th>Absent</th></tr></thead><tbody>
+      ${r.people.map(p => `<tr><td>${person(p)}</td><td class="num">${p.working}</td><td class="num">${p.present + p.late + p.half}</td><td class="num">${p.late}</td><td class="num">${p.leave}</td><td class="num">${p.absent}</td></tr>`).join("")}</tbody></table></section>`;
+  }
+  return "";
+}
+function moneyTiles(t) {
+  const m = t.by_method;
+  return `<div class="tiles-row"><div class="tk big"><small>Net</small><b>${rupees(t.net)}</b></div><div class="tk"><small>Cash</small><b>${rupees(m.cash)}</b></div><div class="tk"><small>UPI</small><b>${rupees(m.upi)}</b></div><div class="tk"><small>Card</small><b>${rupees(m.card)}</b></div></div>
+    <div class="tiles-row"><div class="tk"><small>Visits</small><b>${t.visits}</b></div><div class="tk"><small>Refunds</small><b>${rupees(t.refunded)}</b></div><div class="tk"><small>Discounts</small><b>${rupees(t.discounts)}</b></div><div class="tk"><small>Waived</small><b>${t.waived}</b></div></div>`;
+}
+async function moneyView(sub) {
+  S.mon = S.mon || { from: addDays(TODAY, -6), to: TODAY, doc: "", date: TODAY };
+  if (sub === "today") {
+    const t = await api(`/collections?start=${TODAY}`);
+    const line = (v, amt, extra) => `<div class="r q coll-row"><span class="num muted">${v.receipt_no ? "#" + v.receipt_no : ""}</span><span class="who"><b>${esc(v.patient_name)}</b></span><span class="muted">${extra}</span><b class="num">${amt}</b><button class="btn small" data-a="receipt" data-v="${v.id}">Receipt</button></div>`;
+    return `${subTabs("money", "today")}<section class="panel">${moneyTiles(t)}</section>
+      <section class="panel"><span class="label">Payments</span><div class="rows">${t.payments.map(v => line(v, rupees(v.amount_paid), v.amount_paid ? (v.payment_method || "").toUpperCase() : "Waived")).join("")}
+        ${t.refunds.map(v => line(v, "−" + rupees(v.refund_amount), "Refund · " + esc(v.refund_reason || ""))).join("")}${t.payments.length || t.refunds.length ? "" : `<div class="empty">—</div>`}</div></section>`;
+  }
+  if (sub === "range") {
+    const f = S.mon, t = await api(`/collections?start=${f.from}&end=${f.to}${f.doc ? "&doctor_id=" + f.doc : ""}`);
+    return `${subTabs("money", "range")}<section class="panel"><div class="range-bar"><label class="field">From<input type="date" id="mr-from" max="${TODAY}" value="${f.from}"></label><label class="field">To<input type="date" id="mr-to" max="${TODAY}" value="${f.to}"></label>
+        <label class="field">Doctor<select id="mr-doc"><option value="">All doctors</option>${S.doctors.map(d => `<option value="${d.id}" ${String(d.id) === f.doc ? "selected" : ""}>${esc(d.name)}</option>`).join("")}</select></label><button class="btn primary" data-a="mr-go">Show</button></div>${moneyTiles(t)}</section>
+      <section class="panel scroll"><table class="t"><thead><tr><th>Date</th><th>Visits</th><th>Cash</th><th>UPI</th><th>Card</th><th>Refunds</th><th>Net</th></tr></thead><tbody>
+        ${t.days.map(d => `<tr><td><b>${niceDate(d.date)}</b></td><td class="num">${d.visits}</td><td class="num">${rupees(d.by_method.cash)}</td><td class="num">${rupees(d.by_method.upi)}</td><td class="num">${rupees(d.by_method.card)}</td><td class="num">${rupees(d.refunded)}</td><td class="num"><b>${rupees(d.net)}</b></td></tr>`).join("") || `<tr><td colspan="7" class="muted">—</td></tr>`}</tbody></table></section>`;
+  }
+  const c = await api(`/day-close?date=${S.mon.date}`), done = c.closed, diff = done ? done.counted_cash - done.system_cash : 0;
+  return `${subTabs("money", "close")}<section class="panel close-panel"><div class="range-bar"><label class="field">Date<input type="date" id="dc-date" max="${TODAY}" value="${S.mon.date}" data-a="dc-date"></label></div>
+      <div class="tiles-row"><div class="tk big"><small>Cash in system</small><b>${rupees(c.system_cash)}</b></div>${done ? `<div class="tk"><small>Counted</small><b>${rupees(done.counted_cash)}</b></div><div class="tk ${diff ? "bad" : "good"}"><small>Difference</small><b>${diff > 0 ? "+" : ""}${rupees(diff).replace("₹-", "−₹")}</b></div>` : ""}</div>
+      <div class="grid2"><label class="field">Cash counted (₹)<input type="number" min="0" id="dc-cash" value="${done ? done.counted_cash : ""}"></label><label class="field">Note<input id="dc-note" value="${esc(done?.note || "")}"></label></div>
+      <div class="save-row"><button class="btn primary" data-a="dc-save">${done ? "Update" : "Close day"}</button></div></section>
+    ${c.past.length ? `<section class="panel"><span class="label">Closed days</span><div class="rows">${c.past.map(p => { const d = p.counted_cash - p.system_cash; return `<div class="r close-row"><span class="num"><b>${niceDate(p.date)}</b></span><span class="muted">${esc(p.closed_by_name || "")}</span><span class="num">${rupees(p.system_cash)} → ${rupees(p.counted_cash)}</span><span class="pill ${d ? "s-no_show" : "s-paid"}">${d ? (d > 0 ? "+" : "−") + rupees(Math.abs(d)) : "Matched"}</span></div>`; }).join("")}</div></section>` : ""}`;
+}
+function openLeave(memberId) {
+  const admin = S.me.is_admin && !memberId?.self;
+  M = { kind: "leave-new", type: "casual" };
+  modal(`<h2>Leave</h2>
+    ${admin ? `<label class="field">Person<select id="lv-who">${(S.members || []).filter(m => m.status === "active").map(m => `<option value="${m.id}" ${m.id === memberId ? "selected" : ""}>${esc(m.name)}</option>`).join("")}</select></label>` : ""}
+    <div class="seg" id="lv-type">${LEAVE_TYPES.map(([k, l]) => `<button data-a="lv-type" data-v="${k}" aria-pressed="${k === "casual"}">${l}</button>`).join("")}</div>
+    <div class="grid2"><label class="field">From<input type="date" id="lvn-from" value="${TODAY}"></label><label class="field">To<input type="date" id="lvn-to" value="${TODAY}"></label></div>
+    <label class="field">Reason<input id="lvn-why"></label>
+    <div class="foot"><button class="btn" data-a="close">Back</button><button class="btn primary" data-a="lvn-save">${S.me.is_admin ? "Save" : "Request"}</button></div>`);
+}
+function printRegister() {
+  const r = S.reg, w = window.open("", "_blank");
+  w.document.write(`<!doctype html><title>Register ${r.month}</title><link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&display=swap" rel="stylesheet">
+    <style>body{font-family:Manrope,sans-serif;color:#0B1411;padding:32px}h1{font-size:22px;margin:0 0 4px}p{color:#5b6b64;margin:0 0 20px}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:10px 8px;font-size:14px}th{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#5b6b64}tr:nth-child(even) td{background:#E8F1EC}</style>
+    <h1>${esc(S.clinic.name)} · Working days register</h1><p>${new Date(r.month + "-01T00:00").toLocaleDateString("en-IN", { month: "long", year: "numeric" })}</p>
+    <table><tr><th>Name</th><th>Role</th><th>Working days</th><th>Present</th><th>Late</th><th>Leave</th><th>Absent</th></tr>${r.people.map(p => `<tr><td><b>${esc(p.name)}</b></td><td>${esc(p.role || "")}</td><td>${p.working}</td><td>${p.present + p.late + p.half}</td><td>${p.late}</td><td>${p.leave}</td><td>${p.absent}</td></tr>`).join("")}</table><script>onload=()=>print()<\/script>`);
+  w.document.close();
+}
+
 /* ---------- events ---------- */
 document.addEventListener("click", e => {
   const t = e.target.closest("[data-a]"); if (!t) return;
   const a = t.dataset.a, v = t.dataset.v;
   if (a === "scrim") { if (e.target === t && M?.kind !== "sched") closeModal(); return; }
-  if (["lim", "free-text", "up-file", "mg-q", "vf-q", "vf-doc", "pay-disc", "bk-q", "pt-q", "cs-q", "bk-date", "bk-doc", "sc-doc", "sc-month-picker", "sc-year-picker", "cs-doc"].includes(a)) return;
+  if (["lim", "dc-date", "lvm-m", "lvm-y", "rgm-m", "rgm-y", "free-text", "up-file", "mg-q", "vf-q", "vf-doc", "pay-disc", "bk-q", "pt-q", "cs-q", "bk-date", "bk-doc", "sc-doc", "sc-month-picker", "sc-year-picker", "cs-doc"].includes(a)) return;
   e.preventDefault();
   const D = S.data;
   run(async () => {
@@ -948,7 +1049,7 @@ document.addEventListener("click", e => {
       case "ob-back": { const st = Number(v); if (st === 1) { if (S.me) { logout(); } else go("#/login"); } else viewOnboarding(st - 1); break; }
       case "renew-invite": { const r = await api(`/members/${v}/invite`, { body: {} }); copyLink(`${location.origin}/#/invite/${r.invite_code}`, r.email_sent ? "Invite emailed · link copied" : "Invite link copied · valid 7 days"); break; }
       case "reset-link": { const r = await api(`/members/${v}/reset-link`, { body: {} }); copyLink(`${location.origin}/#/reset/${r.code}`, "Reset link copied · valid 2 hours"); break; }
-      case "account": openAccount(); break;
+      case "account": await openAccount(); break;
       case "ac-save": {
         const nw = $("#ac-new").value;
         if (nw && nw !== $("#ac-new2").value) return toast("New passwords don't match", true);
@@ -1057,6 +1158,22 @@ document.addEventListener("click", e => {
       case "mb-remove": { const m = M.m; const r = await api(`/members/${m.id}`, { method: "DELETE" }); toast(r.removed ? `${m.name} removed` : `${m.name} has visit history, set to inactive`); S.doctors = await api("/doctors"); closeModal(); route(); break; }
       case "mb-save": await saveMember(); break;
       case "ad-tab": go(`#/admin/${v}`); break;
+      case "ad-sub": go(`#/admin/${t.dataset.t}/${v}`); break;
+      case "att-mark": await api(`/attendance/${t.dataset.m}/${TODAY}`, { method: "PUT", body: { status: v, check_in: v === "absent" ? null : new Date().toTimeString().slice(0, 5) } }); route(); break;
+      case "lv-new": if (!S.members) S.members = await api("/members"); openLeave(); break;
+      case "lv-type": M.type = v; document.querySelectorAll('[data-a="lv-type"]').forEach(b => b.setAttribute("aria-pressed", b.dataset.v === v)); break;
+      case "lvn-save": { const who = $("#lv-who")?.value;
+        const r = await api("/leave", { body: { start_date: $("#lvn-from").value, end_date: $("#lvn-to").value || $("#lvn-from").value, type: M.type, reason: $("#lvn-why").value, member_id: who ? Number(who) : null } });
+        closeModal(); toast(r.status === "pending" ? "Leave requested" : r.bookings_affected ? `Leave saved · ${r.bookings_affected} booking${r.bookings_affected > 1 ? "s" : ""} to move` : "Leave saved", r.bookings_affected > 0); route(); break; }
+      case "lv-approve": case "lv-reject": case "lv-cancel": { const r = await api(`/leave/${v}/${a.slice(3)}`, { body: {} });
+        toast({ approve: "Approved", reject: "Rejected", cancel: "Leave cancelled" }[a.slice(3)] + (r.bookings_affected ? ` · ${r.bookings_affected} booking${r.bookings_affected > 1 ? "s" : ""} to move` : ""), r.bookings_affected > 0);
+        M?.kind === "account" ? openAccount() : route(); break; }
+      case "reg-print": printRegister(); break;
+      case "mr-go": Object.assign(S.mon, { from: $("#mr-from").value, to: $("#mr-to").value, doc: $("#mr-doc").value }); route(); break;
+      case "dc-save": await api("/day-close", { body: { date: S.mon.date, counted_cash: Number($("#dc-cash").value) || 0, note: $("#dc-note").value } }); toast("Day closed"); route(); break;
+      case "att-in": case "att-out": await api(`/attendance/check-${a === "att-in" ? "in" : "out"}`, { body: {} }); toast(a === "att-in" ? "Checked in" : "Checked out"); openAccount(); break;
+      case "my-leave": openLeave({ self: true }); break;
+      case "mb-schedule": closeModal(); await openSchedules(Number(v)); break;
       case "ad-details": S.clinic = await api("/clinic", { method: "PUT", body: { name: $("#ad-name").value, phone: $("#ad-phone").value, address: $("#ad-addr").value } }); toast("Saved"); route(); break;
       case "ad-rules": S.clinic = await api("/clinic/rules", { method: "PUT", body: readRules("ad") }); toast("Rules saved."); route(); break;
       case "pt-open": go(`#/patients/${v}`); break;
@@ -1124,6 +1241,8 @@ document.addEventListener("input", e => {
 document.addEventListener("change", e => {
   const a = e.target.dataset?.a;
   if (a === "ops-date") { S.date = e.target.value || TODAY; route(); }
+  if (/^(lvm|rgm)-[my]$/.test(a)) { const [y, m] = S.adm.month.split("-").map(Number); const nm = a.endsWith("-m") ? Number(e.target.value) : m, ny = a.endsWith("-y") ? Number(e.target.value) : y; S.adm.month = `${ny}-${String(nm).padStart(2, "0")}`; route(); }
+  if (a === "dc-date") { S.mon.date = e.target.value || TODAY; route(); }
   if (a === "vf-doc") { S.vf.doc = e.target.value; const r = $("#ops-rows"); if (r && S.data?.visits) r.innerHTML = opsRows(S.data.visits); }
   if (a === "bk-date") { M.date = e.target.value || TODAY; run(loadAvail); }
   if (a === "bk-doc") { M.doctorId = Number(e.target.value); run(loadAvail); }

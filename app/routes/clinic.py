@@ -369,6 +369,13 @@ class MemberUpdate(BaseModel):
     screens: list[str] | None = None
     is_admin: bool | None = None
     status: str | None = Field(default=None, pattern="^(active|inactive)$")
+    joined_on: str | None = None
+    emergency_contact: str | None = None
+    address: str | None = None
+    id_number: str | None = None
+    work_days: list[int] | None = None
+    work_start: str | None = None
+    work_end: str | None = None
 
 
 @router.patch("/members/{member_id}")
@@ -392,6 +399,8 @@ def update_member(member_id: int, body: MemberUpdate, me=Depends(require_admin),
     changes = body.model_dump(exclude_none=True, exclude={"clear_fee"})
     if "screens" in changes:
         changes["screens"] = json.dumps([s for s in changes["screens"] if s in SCREENS])
+    if "work_days" in changes:
+        changes["work_days"] = json.dumps(sorted({d for d in changes["work_days"] if 0 <= d <= 6}))
     if "is_admin" in changes:
         changes["is_admin"] = int(changes["is_admin"])
     if body.clear_fee:

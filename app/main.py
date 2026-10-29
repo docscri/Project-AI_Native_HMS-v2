@@ -6,12 +6,12 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import db
-from .routes import clinic, consultation, operations, patients, schedules
+from .routes import clinic, consultation, operations, patients, schedules, team
 
 FRONTEND = Path(__file__).resolve().parent.parent / "frontend"
 
 app = FastAPI(title="Clinic V1")
-for r in (clinic, schedules, patients, operations, consultation):
+for r in (clinic, schedules, patients, operations, consultation, team):
     app.include_router(r.router)
 
 

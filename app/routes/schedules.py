@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from ..auth import current_member
-from ..db import get_db, log_event, row
+from ..db import get_db, log_event, now, row
 from ..rules import availability, day_schedule, validate_sessions
 from .clinic import clinic_of
 
@@ -125,6 +125,14 @@ def leave(body: Leave, me=Depends(current_member), db=Depends(get_db)):
                 save_day(db, me, d, day, Override(is_off=True))
             else:
                 db.execute("delete from schedule_overrides where doctor_id = ? and date = ?", (d, day))
+    if body.doctor_id:  # keep the Team → Leave list in step with the calendar
+        if body.off:
+            db.execute("""insert into leave_requests (clinic_id, member_id, start_date, end_date, type, status, decided_by, decided_at, created_at)
+                          values (?, ?, ?, ?, 'other', 'approved', ?, ?, ?)""",
+                       (me["clinic_id"], body.doctor_id, body.start_date, body.end_date, me["id"], now(), now()))
+        else:
+            db.execute("update leave_requests set status = 'cancelled' where member_id = ? and status = 'approved' and start_date >= ? and end_date <= ?",
+                       (body.doctor_id, body.start_date, body.end_date))
     log_event(db, me["clinic_id"], me["id"], "schedule", body.doctor_id, "leave" if body.off else "leave_cleared",
               {"from": body.start_date, "to": body.end_date, "all_doctors": not body.doctor_id})
     return {"days": len(days), "doctors": len(ids), "bookings_affected": bookings_on(db, ids, days) if body.off else 0}
