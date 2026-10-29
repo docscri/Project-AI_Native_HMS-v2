@@ -8,7 +8,7 @@ You need **Python 3.10+** and **Git**. Check with `python --version`.
 
 ```bash
 git clone https://github.com/docscri/Project_HMS.git
-cd Project_HMS/new_hms
+cd Project_HMS
 pip install -r requirements.txt
 ```
 
@@ -16,14 +16,14 @@ pip install -r requirements.txt
 
 **Windows (PowerShell)**
 ```powershell
-cd Project_HMS\new_hms
+cd Project_HMS
 $env:SEED_DEMO = "0"
 python -m uvicorn app.main:app --port 8050
 ```
 
 **Mac / Linux**
 ```bash
-cd Project_HMS/new_hms
+cd Project_HMS
 SEED_DEMO=0 python3 -m uvicorn app.main:app --port 8050
 ```
 
@@ -41,6 +41,6 @@ Open **http://localhost:8050** in **Chrome**. Stop with **Ctrl+C**.
 - **Real AI notes (optional):** before starting, set your Gemini key:
   `$env:GEMINI_API_KEY = "your-key"` (Windows) or `export GEMINI_API_KEY=your-key` (Mac/Linux).
   Without it, simple built-in drafts are used.
-- **Your data** is saved in `new_hms/data`. Delete that folder to start over.
+- **Your data** is saved in `data`. Delete that folder to start over.
 - **Port busy?** Use another one, e.g. `--port 8070`.
 - **Try with sample data:** leave out the `SEED_DEMO` line and log in as `anjali@demo.in` / `demo123`.

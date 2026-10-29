@@ -1,6 +1,6 @@
 """Start the clinic app on a free port and open it in the browser.
 
-    python run.py            (from the new_hms folder)
+    python run.py            (from the Project_HMS folder)
 """
 import os
 import socket
