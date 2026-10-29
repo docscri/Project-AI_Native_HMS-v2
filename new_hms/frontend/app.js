@@ -128,7 +128,6 @@ let OB = {};
 function obFrame(step, inner, next = "Continue") {
   authPage(`<div class="ob-card">
     <div class="ob-top"><button class="ob-back" data-a="ob-back" data-v="${step}">${arrowLeft}<span>Back</span></button><span class="label">Step ${step} of 4</span></div>
-    <div class="steps">${[1, 2, 3, 4].map(i => `<i class="${i <= step ? "on" : ""}"></i>`).join("")}</div>
     ${inner}
     <div class="ob-foot">${step === 4 ? `<button class="btn" data-a="ob-finish">Skip</button>` : ""}<button class="btn primary glow" data-a="ob-next" data-v="${step}">${next}</button></div></div>`, "ob");
 }
@@ -181,14 +180,14 @@ function limitBlock(p, v) {
   const l = limitsOf(v.start, v.end, v.limit_by, v.limit_value);
   const patientValue = v.limit_by === "patients" ? v.limit_value : Math.max(1, l.max);
   const minuteValue = v.limit_by === "minutes" ? v.limit_value : Math.max(1, l.per);
+  const byP = v.limit_by === "patients";
   return `<div class="grid2"><label class="field">Start<input type="time" id="${p}-start" value="${v.start}" data-a="lim" data-p="${p}"></label><label class="field">End<input type="time" id="${p}-end" value="${v.end}" data-a="lim" data-p="${p}"></label></div>
-    <div class="field">How do you limit patients?</div>
-    <div class="choices limit-choices">
-      <label class="choice limit-choice"><input type="radio" name="${p}-by" value="patients" ${v.limit_by === "patients" ? "checked" : ""} data-a="lim" data-p="${p}">
-        <b>By number of patients</b><span class="limit-config"><input class="input" type="number" min="1" id="${p}-patients-val" value="${patientValue}" data-a="lim" data-p="${p}"><span class="derived">about ${l.per} min per patient</span></span></label>
-      <label class="choice limit-choice"><input type="radio" name="${p}-by" value="minutes" ${v.limit_by === "minutes" ? "checked" : ""} data-a="lim" data-p="${p}">
-        <b>By time per patient</b><span class="limit-config"><input class="input" type="number" min="1" id="${p}-minutes-val" value="${minuteValue}" data-a="lim" data-p="${p}"><span>min</span><span class="derived">${l.max} patients max</span></span></label>
-    </div>`;
+    <div class="rule-row"><div class="pick-seg">
+      <label><input type="radio" name="${p}-by" value="patients" ${byP ? "checked" : ""} data-a="lim" data-p="${p}"><span>By patients</span></label>
+      <label><input type="radio" name="${p}-by" value="minutes" ${byP ? "" : "checked"} data-a="lim" data-p="${p}"><span>By time</span></label></div>
+      <label class="field" ${byP ? "" : "hidden"}>Patients per session<input type="number" min="1" id="${p}-patients-val" value="${patientValue}" data-a="lim" data-p="${p}"></label>
+      <label class="field" ${byP ? "hidden" : ""}>Minutes per patient<input type="number" min="1" id="${p}-minutes-val" value="${minuteValue}" data-a="lim" data-p="${p}"></label>
+      <span class="rule-hint">${byP ? `≈ ${l.per} min each` : `${l.max} patients max`}</span></div>`;
 }
 function readLimit(p) {
   const by = $(`input[name="${p}-by"]:checked`).value;
@@ -196,14 +195,13 @@ function readLimit(p) {
   return { start: $(`#${p}-start`).value, end: $(`#${p}-end`).value, limit_by: by, limit_value: Number(el?.value) || 1 };
 }
 function rulesForm(p, c) {
-  const dn = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-  return `<label class="field">Default consultation fee (₹)<input type="number" min="0" id="${p}-fee" value="${c.fee}"></label>
-    <div class="field">Working days</div><div class="days">${dn.map((d, i) => `<label><input type="checkbox" id="${p}-d${i}" ${c.days.includes(i) ? "checked" : ""}>${d}</label>`).join("")}</div>
-    <div id="${p}-lim" class="choices">${limitBlock(p, c)}</div>
-    <div class="field">Token</div>
-    <div class="choices"><label class="choice"><input type="radio" name="${p}-tok" value="booking" ${c.token_timing === "booking" ? "checked" : ""}><span><b>At booking</b></span></label>
-      <label class="choice"><input type="radio" name="${p}-tok" value="arrival" ${c.token_timing === "arrival" ? "checked" : ""}><span><b>On arrival</b></span></label></div>
-`;
+  const dn = ["S", "M", "T", "W", "T", "F", "S"], full = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  return `<label class="field">Consultation fee (₹)<input type="number" min="0" id="${p}-fee" value="${c.fee}"></label>
+    <div class="rule-group"><span class="rule-label">Working days</span><div class="day-dots">${dn.map((d, i) => `<label title="${full[i]}"><input type="checkbox" id="${p}-d${i}" ${c.days.includes(i) ? "checked" : ""} aria-label="${full[i]}"><span>${d}</span></label>`).join("")}</div></div>
+    <div class="rule-group"><span class="rule-label">Hours</span><div id="${p}-lim" class="rule-stack">${limitBlock(p, c)}</div></div>
+    <div class="rule-group"><span class="rule-label">Token</span><div class="pick-seg">
+      <label><input type="radio" name="${p}-tok" value="booking" ${c.token_timing === "booking" ? "checked" : ""}><span>At booking</span></label>
+      <label><input type="radio" name="${p}-tok" value="arrival" ${c.token_timing === "arrival" ? "checked" : ""}><span>On arrival</span></label></div></div>`;
 }
 const readRules = p => ({ fee: Number($(`#${p}-fee`).value) || 0, days: [0, 1, 2, 3, 4, 5, 6].filter(i => $(`#${p}-d${i}`).checked),
   ...readLimit(p), token_timing: $(`input[name="${p}-tok"]:checked`).value });
@@ -449,7 +447,7 @@ function copyInvite(code, msg) {
 
 /* ---------- consultation ---------- */
 /* ---------- consultation (doctor workspace, full-screen layout) ---------- */
-const CTABS = [["brief", "Brief"], ["dictate", "Dictate"], ["note", "Note"]];
+const CTABS = [["brief", "Brief"], ["dictate", "Transcript"], ["note", "Note"]];
 async function viewConsult(visitId, doctorParam, patientParam) {
   const isDoctor = S.me.kind === "doctor";
   const doctorId = Number(doctorParam) || (isDoctor ? S.me.id : S.doctors[0]?.id);
@@ -485,10 +483,10 @@ function renderConsult() {
       <span class="cx-chip solid">${m.kind === "doctor" ? "Doctor" : esc(m.designation || "Staff")}</span>
       <button class="cx-avatar" data-a="logout" title="Log out ${esc(m.name)}">${esc(initials(m.name))}</button>
     </header>
-    <div class="cx-body">
+    <div class="cx-body ${S.rightCollapsed ? "wide" : ""}"><button class="cx-collapse" data-a="cs-collapse" aria-label="${S.rightCollapsed ? "Show side panel" : "Hide side panel"}" title="${S.rightCollapsed ? "Show side panel" : "Hide side panel"}"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${S.rightCollapsed ? "M15 6l-6 6 6 6" : "M9 6l6 6-6 6"}"/></svg></button>
       <aside class="cx-left">${leftCol()}</aside>
       <main class="cx-center" id="cx-center">${center()}${floatMic ? `<div class="cx-float">${micBtn(v)}</div>` : ""}</main>
-      <aside class="cx-right">${rightCol()}</aside>
+      ${S.rightCollapsed ? "" : `<aside class="cx-right">${rightCol()}</aside>`}
     </div>
   </div>`;
   const tr = $(".transcript"); if (tr) tr.scrollTop = tr.scrollHeight;
@@ -526,7 +524,7 @@ function center() {
   const stateLabel = { waiting: "Waiting", with_doctor: "In visit", done: "Signed", booked: "Booked" }[v.status];
   return `<div class="cx-card">
     <div class="cx-head"><div><h1>${esc(v.patient_name)}${v.age != null ? ", " + v.age : ""}</h1>
-      <p class="muted">${{ M: "Male", F: "Female", O: "Other" }[v.sex] || ""} · ${esc(v.uhid)} · ${esc(v.token_label || "")}</p></div>
+</div>
       <span class="cx-status st-${v.status}"><i></i>${stateLabel}</span></div>
     <div class="cx-tabs">${CTABS.map(([k, l]) => `<button data-a="cs-tab" data-v="${k}" aria-pressed="${S.ctab === k}">${l}</button>`).join("")}</div>
     <div class="cx-pane">${({ brief: paneBrief, dictate: paneDictate, note: paneNote })[S.ctab](v)}</div>
@@ -535,25 +533,14 @@ function center() {
 function paneBrief(v) {
   const items = v.brief?.items || [];
   const lead = items[0], rest = items.slice(1);
-  const findings = v.documents.flatMap(d => (d.extracted?.findings || []).map(f => ({ ...f, doc: d.id })));
-  return `<div class="cx-sec"><span class="label">Previsit brief</span>${v.status === "with_doctor" ? `<button class="cx-pill-btn" data-a="cs-brief" data-v="${v.id}">Refresh</button>` : ""}</div>
-    ${lead ? `<p class="cx-lead">${esc(lead.text)}${citeBtns(lead.cites)}</p>
-      ${rest.length ? `<div class="cx-events">${rest.map(i => `<div class="${i.flag ? "flag" : ""}"><span>${i.flag ? "⚠" : "•"}</span><span>${esc(i.text)}${citeBtns(i.cites)}</span></div>`).join("") }</div>` : ""}`
-      : `<p class="muted">${v.status === "with_doctor" ? "Preparing brief…" : "—"}</p>`}
-    ${findings.length ? `<span class="label">Findings</span><div class="cx-findings">${findings.map(f => `<button data-a="cite" data-v="D${f.doc}">${esc(f.name)} ${esc(f.value)} ${esc(f.unit || "")}</button>`).join("")}</div>` : ""}
-    <span class="label">Documents</span>
-    <div class="cx-docs">${v.documents.map(d => `<div class="cx-doc" id="ev-D${d.id}"><a data-a="open-doc" data-v="${d.id}">${esc(d.filename)}</a><span class="grow"></span>
-      <span class="cx-ds ${d.ai_status}">${{ ready: "Processed", processing: "Processing", failed: "Could not read" }[d.ai_status]}</span></div>`).join("") || `<div class="muted">—</div>`}</div>
-    ${v.status !== "done" ? `<div><button class="btn" data-a="upload" data-v="${v.id}">Upload PDF or image</button></div>` : ""}`;
+  if (!lead) return v.status === "with_doctor" ? `<p class="muted cx-lead">Preparing brief…</p>` : "";
+  return `<p class="cx-lead">${esc(lead.text)}${citeBtns(lead.cites)}</p>
+    ${rest.length ? `<div class="cx-events">${rest.map(i => `<div class="${i.flag ? "flag" : ""}"><span>${i.flag ? "⚠" : "•"}</span><span>${esc(i.text)}${citeBtns(i.cites)}</span></div>`).join("")}</div>` : ""}`;
 }
 function paneDictate(v) {
-  const lines = v.transcript.map(s => seg(s)).join("");
-  if (v.status !== "with_doctor") return lines ? `<div class="transcript live">${lines}</div>` : `<p class="muted">—</p>`;
-  return `<div class="transcript live">${lines || `<div class="cx-lead muted">${S.rec ? "Listening…" : ""}</div>`}</div>
-    <div class="dict"><div class="seg"><button data-a="spk" data-v="Doctor" aria-pressed="${(S.speaker || "Doctor") === "Doctor"}">Doctor</button><button data-a="spk" data-v="Patient" aria-pressed="${S.speaker === "Patient"}">Patient</button></div>
-      <input class="input" id="dict-in" placeholder="Type a line" data-v="${v.id}"><button class="btn small" data-a="dict-add" data-v="${v.id}">Add</button></div>`;
+  return `<div class="live-text">${v.transcript.map(s => `<span class="live-seg" id="ev-${s.id}">${esc(s.text)} </span>`).join("")}<span class="live-interim" id="live-interim">${esc(S.interim || "")}</span>${S.rec ? `<span class="live-cursor"></span>` : ""}</div>`;
 }
-const seg = s => `<div class="seg-line ${s.speaker === "Patient" ? "patient" : ""}" id="ev-${s.id}"><span class="sp">${esc(s.speaker)}</span><span>${esc(s.text)}</span><span class="cite">${s.id}</span></div>`;
+const seg = s => `<span class="live-seg" id="ev-${s.id}">${esc(s.text)} </span>`;
 function paneNote(v) {
   const n = v.note, signed = n?.status === "signed";
   const canDraft = v.status === "with_doctor" && (v.transcript.length || v.documents.some(d => d.ai_status === "ready"));
@@ -607,9 +594,15 @@ function readNote() {
 }
 function startMic(visitId) {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) { S.ctab = "dictate"; refreshConsult(); return toast("Microphone not supported in this browser", true); }
-  const r = new SR(); r.lang = "en-IN"; r.continuous = true; r.interimResults = false;
-  r.onresult = e => { for (let i = e.resultIndex; i < e.results.length; i++) if (e.results[i].isFinal) addLine(visitId, e.results[i][0].transcript); };
+  if (!SR) { refreshConsult(); return toast("Use Chrome to dictate", true); }
+  const r = new SR(); r.lang = "en-IN"; r.continuous = true; r.interimResults = true;
+  r.onresult = e => {
+    let interim = "";
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      if (e.results[i].isFinal) { S.interim = ""; addLine(visitId, e.results[i][0].transcript); } else interim += e.results[i][0].transcript;
+    }
+    S.interim = interim; const el = $("#live-interim"); if (el) el.textContent = interim;
+  };
   r.onend = () => { if (S.rec === r) { S.rec = null; S.recStart = null; clearInterval(S.recT); refreshConsult(); } };
   r.onerror = e => toast("Mic: " + e.error, true);
   S.rec = r; S.recStart = Date.now(); clearInterval(S.recT); S.recT = setInterval(() => { const t = $("#dock-timer"); if (t && S.recStart) t.textContent = fmtClock(Date.now() - S.recStart); }, 500); r.start(); refreshConsult();
@@ -750,6 +743,7 @@ document.addEventListener("click", e => {
       case "cs-draft-go": await api(`/visits/${v}/note/draft`, { body: {} }); S.ctab = "note"; toast("Draft ready. Check it, then sign."); refreshConsult(); break;
       case "note-sign-ro": await api(`/notes/${v}`, { method: "PUT", body: D.cur.note.content }); await api(`/notes/${v}/sign`, { body: {} }); toast("Signed. Visit complete."); refreshConsult(); break;
       case "cs-next-mic": { const r = await api(`/consultation/next?doctor_id=${v}`, { body: {} }); S.ctab = "dictate"; await new Promise(res => { const once = () => { window.removeEventListener("hashchange", once); setTimeout(res, 300); }; window.addEventListener("hashchange", once); go(`#/consult/${r.id}?doctor=${v}`); }); startMic(r.id); break; }
+      case "cs-collapse": S.rightCollapsed = !S.rightCollapsed; renderConsult(); break;
       case "cs-mic": {
         const cur = D.cur;
         if (S.rec) { const r = S.rec; S.rec = null; S.recStart = null; clearInterval(S.recT); r.stop(); refreshConsult(); break; }

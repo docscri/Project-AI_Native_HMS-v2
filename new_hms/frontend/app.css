@@ -676,3 +676,46 @@ table.members tr.click:hover td:first-child b { text-decoration-color: var(--ink
 /* search results and the chosen patient sit on the theme tile, not white */
 .pick button, .hit { background: var(--tile); }
 .pick button:hover { background: var(--tile-2); }
+
+/* ---------- clinic rules (onboarding + administration) ---------- */
+.rule-group { display: flex; flex-direction: column; gap: 10px; }
+.rule-label { font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); padding-left: 4px; }
+.rule-stack { display: flex; flex-direction: column; gap: 12px; }
+.day-dots { display: flex; gap: 8px; flex-wrap: wrap; }
+.day-dots label { cursor: pointer; }
+.day-dots input, .pick-seg input { position: absolute; opacity: 0; pointer-events: none; }
+.day-dots span { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; background: var(--tile); color: var(--muted); font-weight: 800; font-size: 14px; transition: background .2s, color .2s, transform .15s; }
+.day-dots label:hover span { transform: translateY(-1px); }
+.day-dots input:checked + span { background: var(--ink); color: var(--lime); }
+.day-dots input:focus-visible + span, .pick-seg input:focus-visible + span { outline: 2px solid var(--ink); outline-offset: 2px; }
+.pick-seg { display: inline-flex; background: var(--tile); border-radius: 999px; padding: 4px; gap: 2px; width: fit-content; }
+.pick-seg label { cursor: pointer; }
+.pick-seg span { display: inline-flex; align-items: center; min-height: 40px; padding: 0 18px; border-radius: 999px; font-weight: 700; font-size: 14px; color: var(--muted); transition: background .2s, color .2s; white-space: nowrap; }
+.pick-seg input:checked + span { background: var(--ink); color: var(--surface); }
+.rule-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.rule-row .field { width: 190px; }
+.rule-hint { color: var(--muted); font-size: 13.5px; font-weight: 600; }
+.ob-top { padding-bottom: 4px; }
+
+/* ---------- consultation: plain tabs, live text, collapsible side ---------- */
+.cx-tabs { border: 0; background: transparent; padding: 0; gap: 6px; }
+.cx-tabs button { background: var(--tile); }
+.cx-tabs button:hover { background: var(--tile-2); }
+.cx-tabs button[aria-pressed="true"] { background: var(--ink); color: var(--surface); }
+.live-text { font-size: clamp(20px, 2.4vw, 26px); font-weight: 500; line-height: 1.6; color: var(--ink); min-height: 200px; }
+.live-seg { transition: background .3s; border-radius: 6px; }
+.live-seg.hl { background: var(--lime); }
+.live-interim { color: var(--muted); }
+.live-cursor { display: inline-block; width: 3px; height: 1.1em; margin-left: 4px; vertical-align: -3px; background: var(--coral); animation: blink 1s steps(2) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.cx-body { position: relative; }
+.cx-body.wide { grid-template-columns: 290px minmax(0, 1fr); }
+.cx-collapse { position: absolute; top: 18px; right: 30px; z-index: 5; width: 38px; height: 38px; border-radius: 50%; border: 0; background: var(--ink); color: var(--surface); display: grid; place-items: center; cursor: pointer; box-shadow: 0 6px 16px -8px #000; transition: transform .2s; }
+.cx-collapse:hover { transform: scale(1.06); }
+.cx-body:not(.wide) .cx-collapse { right: 332px; }
+@media (max-width: 1200px) { .cx-collapse { display: none; } }
+.cx-collapse { top: 96px; right: 3px; border: 3px solid var(--frame); width: 40px; height: 40px; }
+.cx-body:not(.wide) .cx-collapse { right: 312px; }
+.panel .day-dots span, .panel .pick-seg { background: var(--tile-2); }
+.panel .day-dots input:checked + span { background: var(--ink); }
+.rule-row .field { width: 180px; }
