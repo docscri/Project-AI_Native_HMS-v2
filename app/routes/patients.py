@@ -5,7 +5,7 @@ from datetime import date
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
-from ..auth import current_member, require_screen
+from ..auth import require_any, require_screen
 from ..db import get_db, log_event, row, rows
 from .clinic import clean_phone
 
@@ -74,13 +74,13 @@ def get_patient(db, me, patient_id: int) -> dict:
 
 
 @router.get("/check")
-def check(name: str = "", phone: str = "", dob: str | None = None, me=Depends(current_member), db=Depends(get_db)):
+def check(name: str = "", phone: str = "", dob: str | None = None, me=Depends(require_any("operations", "patients", "consultation")), db=Depends(get_db)):
     """Before registering: anyone who may already be this patient."""
     return similar(db, me["clinic_id"], " ".join(name.split()), clean_phone(phone), dob or None)
 
 
 @router.post("")
-def register(body: PatientIn, me=Depends(current_member), db=Depends(get_db)):
+def register(body: PatientIn, me=Depends(require_any("operations", "patients", "consultation")), db=Depends(get_db)):
     data = clean(body)
     db.lock(f"uhid:{me['clinic_id']}")
     c = row(db.execute("select uhid_prefix, next_uhid from clinics where id = ?", (me["clinic_id"],)).fetchone())
@@ -93,7 +93,7 @@ def register(body: PatientIn, me=Depends(current_member), db=Depends(get_db)):
 
 
 @router.get("")
-def search(q: str = "", me=Depends(current_member), db=Depends(get_db)):
+def search(q: str = "", me=Depends(require_any("operations", "patients", "consultation")), db=Depends(get_db)):
     like = f"%{q.strip().lower()}%"
     return rows(db.execute(
         """select * from patients where clinic_id = ? and (lower(name) like ? or phone like ? or lower(uhid) like ?)
@@ -122,7 +122,7 @@ def profile(patient_id: int, me=Depends(require_screen("patients")), db=Depends(
 
 
 @router.patch("/{patient_id}")
-def edit(patient_id: int, body: PatientEdit, me=Depends(current_member), db=Depends(get_db)):
+def edit(patient_id: int, body: PatientEdit, me=Depends(require_any("operations", "patients")), db=Depends(get_db)):
     get_patient(db, me, patient_id)
     changes = clean(body)
     if changes:

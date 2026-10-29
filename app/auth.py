@@ -69,9 +69,13 @@ def public_member(m: dict) -> dict:
     m = dict(m)
     for key in ("password_hash", "token", "failed_logins", "locked_until"):
         m.pop(key, None)
-    m["screens"] = SCREENS if m["is_owner"] else json.loads(m["screens"])
     m["is_owner"] = bool(m["is_owner"])
     m["is_admin"] = bool(m["is_admin"] or m["is_owner"])
+    # Rules apply on every request, so older records with wrong ticks are covered too:
+    # Administration needs admin access; Consultation is for doctors only.
+    m["screens"] = list(SCREENS) if m["is_owner"] else [
+        x for x in json.loads(m["screens"]) if x in SCREENS
+        and (x != "administration" or m["is_admin"]) and (x != "consultation" or m["kind"] == "doctor")]
     m["invite_expired"] = bool(m.get("invite_expires_at") and m["invite_expires_at"] < now())
     return m
 
@@ -105,7 +109,17 @@ def require_screen(screen: str):
     return check
 
 
+def require_any(*screens: str):
+    """Allowed if the person has at least one of these screens."""
+    def check(me: dict = Depends(current_member)) -> dict:
+        if not any(x in me["screens"] for x in screens):
+            raise HTTPException(403, "No access.")
+        return me
+    return check
+
+
 def require_admin(me: dict = Depends(current_member)) -> dict:
-    if not me["is_admin"]:
+    """Admin actions need both admin access and the Administration screen (the owner always has both)."""
+    if not (me["is_admin"] and "administration" in me["screens"]):
         raise HTTPException(403, "Only an admin can change this.")
     return me

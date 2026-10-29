@@ -9,7 +9,7 @@ from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 
 from .. import ai, printpage, storage
-from ..auth import current_member, member_for_token, require_screen
+from ..auth import current_member, member_for_token, public_member, require_any, require_screen
 from ..db import connect, get_db, log_event, now, row, rows
 from .clinic import clinic_of
 from .operations import get_visit, move, visit_rows
@@ -96,7 +96,7 @@ def start(visit_id: int, me=Depends(doctor_screen), db=Depends(get_db)):
 
 
 @router.get("/visits/{visit_id}")
-def workspace(visit_id: int, me=Depends(current_member), db=Depends(get_db)):
+def workspace(visit_id: int, me=Depends(require_any("consultation", "patients")), db=Depends(get_db)):
     v = get_visit(db, me, visit_id)
     out = visit_rows(db, me, "v.id = ?", (visit_id,))[0]
     out["age"] = age(out["dob"])
@@ -183,7 +183,7 @@ def run_extraction(doc_id: int) -> None:
 
 @router.post("/visits/{visit_id}/documents")
 async def upload(visit_id: int, tasks: BackgroundTasks, file: UploadFile = File(...),
-                 me=Depends(current_member), db=Depends(get_db)):
+                 me=Depends(require_any("operations", "consultation", "patients")), db=Depends(get_db)):
     v = get_visit(db, me, visit_id)
     mime = file.content_type or mimetypes.guess_type(file.filename or "")[0] or "application/octet-stream"
     if mime == "image/jpg":
@@ -206,7 +206,7 @@ async def upload(visit_id: int, tasks: BackgroundTasks, file: UploadFile = File(
 
 
 @router.get("/documents/{doc_id}/file")
-def document_file(doc_id: int, me=Depends(current_member), db=Depends(get_db)):
+def document_file(doc_id: int, me=Depends(require_any("consultation", "patients")), db=Depends(get_db)):
     d = row(db.execute("select * from documents where id = ? and clinic_id = ?", (doc_id, me["clinic_id"])).fetchone())
     if not d:
         raise HTTPException(404, "Document not found.")
@@ -318,6 +318,8 @@ def print_note(note_id: int, token: str, auto: int = 0, db=Depends(get_db)):
     n = row(db.execute("select * from notes where id = ?", (note_id,)).fetchone())
     if not me:
         return HTMLResponse(printpage.message("Log in again", "Your session has ended. Open the note from the app."), 401)
+    if not {"consultation", "patients"} & set(public_member(me)["screens"]):
+        return HTMLResponse(printpage.message("No access", "Notes open for doctors and the Patients screen."), 403)
     if not n or n["clinic_id"] != me["clinic_id"]:
         return HTMLResponse(printpage.message("Note not found", "It may have been removed."), 404)
     c = clinic_of(db, me)
