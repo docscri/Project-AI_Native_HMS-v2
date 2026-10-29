@@ -70,6 +70,7 @@ def seed() -> bool:
         pid[name] = db.execute("insert into patients (clinic_id, uhid, name, dob, sex, phone) values (?, ?, ?, ?, ?, ?)",
                                (cid, f"SC-{i:04d}", name, dob, sex, phone)).lastrowid
     db.execute("update clinics set next_uhid = ? where id = ?", (len(people) + 1, cid))
+    db.execute("update patients set consent_at = ? where clinic_id = ?", (now(), cid))
 
     ts = now()
 

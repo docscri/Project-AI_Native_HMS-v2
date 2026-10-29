@@ -19,15 +19,15 @@ def owner(c, email):
 def test_patient_checks_duplicates_and_merge():
     with TestClient(app) as c:
         h, doc = owner(c, "pt@x.in")
-        assert c.post("/api/patients", headers=h, json={"name": "Asha", "phone": "123"}).status_code == 422
-        assert c.post("/api/patients", headers=h, json={"name": "Asha", "dob": "2999-01-01"}).status_code == 422
-        assert c.post("/api/patients", headers=h, json={"name": "Asha", "dob": "1850-01-01"}).status_code == 422
-        a = c.post("/api/patients", headers=h, json={"name": "Asha  Nair", "phone": "98470 11111", "dob": "1990-05-01"}).json()
+        assert c.post("/api/patients", headers=h, json={"consent": True, "name": "Asha", "phone": "123"}).status_code == 422
+        assert c.post("/api/patients", headers=h, json={"consent": True, "name": "Asha", "dob": "2999-01-01"}).status_code == 422
+        assert c.post("/api/patients", headers=h, json={"consent": True, "name": "Asha", "dob": "1850-01-01"}).status_code == 422
+        a = c.post("/api/patients", headers=h, json={"consent": True, "name": "Asha  Nair", "phone": "98470 11111", "dob": "1990-05-01"}).json()
         assert a["name"] == "Asha Nair" and a["phone"] == "9847011111"
         assert [x["id"] for x in c.get("/api/patients/check", headers=h, params={"name": "asha nair", "phone": ""}).json()] == [a["id"]]
         assert c.get("/api/patients/check", headers=h, params={"name": "Asha Nair", "dob": "1991-01-01"}).json() == []
         assert len(c.get("/api/patients/check", headers=h, params={"name": "Someone", "phone": "9847011111"}).json()) == 1
-        b = c.post("/api/patients", headers=h, json={"name": "Asha N", "sex": "F"}).json()
+        b = c.post("/api/patients", headers=h, json={"consent": True, "name": "Asha N", "sex": "F"}).json()
         c.post("/api/visits", headers=h, json={"patient_id": b["id"], "doctor_id": doc, "date": TODAY})
         m = c.post(f"/api/patients/{a['id']}/merge", headers=h, json={"other_id": b["id"]}).json()
         assert m["sex"] == "F" and len(c.get(f"/api/patients/{a['id']}", headers=h).json()["visits"]) == 1
@@ -37,7 +37,7 @@ def test_patient_checks_duplicates_and_merge():
 def test_hand_written_note_and_activity():
     with TestClient(app) as c:
         h, doc = owner(c, "note@x.in")
-        p = c.post("/api/patients", headers=h, json={"name": "Note Patient"}).json()
+        p = c.post("/api/patients", headers=h, json={"consent": True, "name": "Note Patient"}).json()
         v = c.post("/api/visits/walk-in", headers=h, json={"patient_id": p["id"], "doctor_id": doc, "payment_method": "cash"}).json()
         assert c.post(f"/api/visits/{v['id']}/note", headers=h).status_code == 409
         c.post(f"/api/visits/{v['id']}/start", headers=h)
@@ -50,7 +50,7 @@ def test_hand_written_note_and_activity():
 def test_address_and_owner_edit_during_setup():
     with TestClient(app) as c:
         h, doc = owner(c, "addr@x.in")
-        p = c.post("/api/patients", headers=h, json={"name": "Addr", "address": " 12  MG Road,  Kochi "}).json()
+        p = c.post("/api/patients", headers=h, json={"consent": True, "name": "Addr", "address": " 12  MG Road,  Kochi "}).json()
         assert p["address"] == "12 MG Road, Kochi"
         assert c.patch(f"/api/patients/{p['id']}", headers=h, json={"address": "Calicut"}).json()["address"] == "Calicut"
         m = c.put("/api/onboarding/owner", headers=h, json={"name": "Dr. Q", "email": "new@x.in", "password": "newpass123", "is_doctor": False}).json()
@@ -63,7 +63,7 @@ def test_address_and_owner_edit_during_setup():
 def test_free_text_space():
     with TestClient(app) as c:
         h, doc = owner(c, "free@x.in")
-        p = c.post("/api/patients", headers=h, json={"name": "Free Text"}).json()
+        p = c.post("/api/patients", headers=h, json={"consent": True, "name": "Free Text"}).json()
         v = c.post("/api/visits/walk-in", headers=h, json={"patient_id": p["id"], "doctor_id": doc, "payment_method": "cash"}).json()
         assert c.put(f"/api/visits/{v['id']}/text", headers=h, json={"text": "x"}).status_code == 409
         c.post(f"/api/visits/{v['id']}/start", headers=h)
@@ -75,3 +75,18 @@ def test_free_text_space():
         assert n["citations"]["A"] == ["T3"]
         c.post(f"/api/notes/{n['id']}/sign", headers=h)
         assert c.put(f"/api/visits/{v['id']}/text", headers=h, json={"text": "late edit"}).status_code == 409
+
+
+def test_consent_is_required_and_recorded():
+    with TestClient(app) as c:
+        h, _ = owner(c, "consent@x.in")
+        assert c.post("/api/patients", headers=h, json={"name": "No Consent"}).status_code == 422
+        p = c.post("/api/patients", headers=h, json={"name": "With Consent", "consent": True}).json()
+        assert p["consent_at"]
+
+
+def test_clinic_time_zone():
+    import time
+    from datetime import datetime, timezone
+    import app  # noqa: F401  (sets the zone)
+    assert time.strftime("%Z") in ("IST", "+0530") or datetime.now().astimezone().utcoffset().total_seconds() == 19800

@@ -480,6 +480,7 @@ function openRegister(name) {
     <div class="grid2"><label class="field">Name<input id="rg-name" value="${esc(name || "")}"></label><label class="field">Phone<input id="rg-phone" placeholder="98470 12345"></label></div>
     <div class="grid2"><label class="field">Date of birth<input id="rg-dob" type="date" max="${TODAY}"></label><label class="field">Sex<select id="rg-sex"><option value="M">Male</option><option value="F">Female</option><option value="O">Other</option></select></label></div>
     <label class="field">Address<input id="rg-addr"></label>
+    <label class="choice"><input type="checkbox" id="rg-consent"><span><b>Patient agrees to the clinic keeping their health records</b></span></label>
     <div class="foot"><button class="btn" data-a="${back ? "rg-back" : "close"}">${back ? "Back" : "Cancel"}</button><button class="btn primary" data-a="rg-save">Register</button></div>`);
   setTimeout(() => $("#rg-name")?.focus(), 30);
 }
@@ -900,7 +901,7 @@ async function viewPatients(id) {
 function profile(p) {
   const visits = p.visits.filter(v => ["done", "with_doctor", "waiting", "booked"].includes(v.status));
   return `<section class="panel" style="gap:14px"><div class="actions" style="justify-content:space-between;align-items:flex-start"><div><h2>${esc(p.name)}</h2>
-      <div class="muted">${ageOf(p.dob)} ${esc(p.sex || "")} · <span class="mono">${esc(p.uhid)}</span> · ${esc(p.phone)}</div>${p.address ? `<div class="muted">${esc(p.address)}</div>` : ""}</div><span class="actions" style="gap:6px"><button class="btn small" data-a="pt-edit" data-v="${p.id}">Edit</button><button class="btn small" data-a="pt-merge" data-v="${p.id}">Merge</button></span></div>
+      <div class="muted">${ageOf(p.dob)} ${esc(p.sex || "")} · <span class="mono">${esc(p.uhid)}</span> · ${esc(p.phone)}</div>${p.address ? `<div class="muted">${esc(p.address)}</div>` : ""}${p.consent_at ? `<div class="muted consent-line">✓ Consent ${longDate(p.consent_at)}</div>` : ""}</div><span class="actions" style="gap:6px"><button class="btn small" data-a="pt-edit" data-v="${p.id}">Edit</button><button class="btn small" data-a="pt-merge" data-v="${p.id}">Merge</button></span></div>
     <span class="label">Visit history</span>
     ${visits.length ? `<div class="timeline">${visits.map(v => `<div class="tl"><div class="tl-head"><b>${longDate(v.date)}</b><span>${esc(v.doctor)}</span>${pill(v.status)}</div>
       <div class="items">${v.note ? `<button class="btn small" data-a="note-view" data-v="${v.id}">${v.note.status === "signed" ? "Note & prescription" : "Draft note"}</button>` : ""}
@@ -1132,14 +1133,15 @@ document.addEventListener("click", e => {
       case "rg-use": { const p = M.same.find(x => x.id === Number(v));
         if (M.back) { const back = M.back; M = back; M.patient = p; renderBooking(); } else { closeModal(); location.hash.startsWith("#/consult") ? go(`#/consult?doctor=${S.data.doctorId}&patient=${p.id}`) : go(`#/patients/${p.id}`); }
         break; }
-      case "rg-again": { const f = M.form, back = M.back; openRegister(f.name); M.back = back; $("#rg-phone").value = f.phone; $("#rg-dob").value = f.dob || ""; $("#rg-sex").value = f.sex; $("#rg-addr").value = f.address || ""; break; }
+      case "rg-again": { const f = M.form, back = M.back; openRegister(f.name); M.back = back; $("#rg-phone").value = f.phone; $("#rg-dob").value = f.dob || ""; $("#rg-sex").value = f.sex; $("#rg-addr").value = f.address || ""; $("#rg-consent").checked = !!f.consent; break; }
       case "pt-merge": M = { kind: "merge", id: Number(v), q: "", results: [] }; renderMerge(); break;
       case "mg-clear": M.other = null; renderMerge(); break;
       case "mg-pick": M.other = M.results.find(x => x.id === Number(v)); renderMerge(); break;
       case "mg-go": { const p = await api(`/patients/${M.id}/merge`, { body: { other_id: M.other.id } }); closeModal(); toast(`Merged into ${p.uhid}`); go(`#/patients/${p.id}`); route(); break; }
       case "rg-back": { const back = M.back; M = back; renderBooking(); break; }
       case "rg-save": case "rg-new": {
-        const f = a === "rg-new" ? M.form : { name: $("#rg-name").value, phone: $("#rg-phone").value, dob: $("#rg-dob").value || null, sex: $("#rg-sex").value, address: $("#rg-addr").value };
+        const f = a === "rg-new" ? M.form : { name: $("#rg-name").value, phone: $("#rg-phone").value, dob: $("#rg-dob").value || null, sex: $("#rg-sex").value, address: $("#rg-addr").value, consent: $("#rg-consent").checked };
+        if (!f.consent) return toast("Tick patient consent", true);
         if (a === "rg-save") {
           const same = await api(`/patients/check?name=${encodeURIComponent(f.name)}&phone=${encodeURIComponent(f.phone)}&dob=${f.dob || ""}`);
           if (same.length) {

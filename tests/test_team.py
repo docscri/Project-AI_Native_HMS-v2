@@ -46,7 +46,7 @@ def test_attendance_leave_register_and_money():
         assert reg[nurse]["present"] + reg[nurse]["late"] == 1 and reg[doc]["present"] == 1
         assert [p["id"] for p in c.get("/api/team/register", headers=nh, params={"month": TODAY[:7]}).json()["people"]] == [nurse]
         # collections and day close
-        p = c.post("/api/patients", headers=h, json={"name": "Money"}).json()
+        p = c.post("/api/patients", headers=h, json={"consent": True, "name": "Money"}).json()
         v = c.post("/api/visits/walk-in", headers=h, json={"patient_id": p["id"], "doctor_id": doc, "payment_method": "cash"}).json()
         c.post(f"/api/visits/{v['id']}/refund", headers=h, json={"amount": 50, "reason": "Charged twice"})
         col = c.get("/api/collections", headers=h, params={"start": TODAY}).json()

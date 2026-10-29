@@ -1,0 +1,40 @@
+# Production on Render with Supabase (database + document storage). Data survives restarts and deploys.
+# Render → New → Blueprint → this repo → Blueprint path: render.production.yaml
+# In Supabase use the "Session pooler" connection string (Render can't reach the direct one).
+services:
+  - type: web
+    name: dictate-clinic
+    runtime: python
+    plan: starter            # always on; the free plan sleeps after 15 idle minutes
+    region: singapore
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT --proxy-headers --forwarded-allow-ips="*"
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: CLINIC_TZ
+        value: Asia/Kolkata
+      - key: DATABASE_URL          # Supabase → Connect → Session pooler URI
+        sync: false
+      - key: SUPABASE_URL          # Supabase → Project Settings → API → Project URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY  # Supabase → Project Settings → API → service_role key
+        sync: false
+      - key: SUPABASE_BUCKET
+        value: clinic-documents
+      - key: APP_URL               # the address people open, e.g. https://dictate-clinic.onrender.com
+        sync: false
+      - key: SMTP_HOST             # optional: invites and password resets by email
+        sync: false
+      - key: SMTP_PORT
+        value: "587"
+      - key: SMTP_USER
+        sync: false
+      - key: SMTP_PASSWORD
+        sync: false
+      - key: SMTP_FROM
+        sync: false
+      - key: GEMINI_API_KEY        # optional: leave empty to keep patient data away from AI services
+        sync: false

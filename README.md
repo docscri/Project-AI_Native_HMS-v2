@@ -71,3 +71,13 @@ Without email, admins copy invite and password-reset links from **Administration
 `render.yaml` sets this up: Render → **New → Blueprint** → pick this repo → fill `DEMO_EMAIL` / `DEMO_PASSWORD` → **Apply**.
 It runs on SQLite with the demo clinic. Render's free disk is wiped on every restart or deploy, so the demo starts fresh each time (your login is added again automatically). Not for real patient data; use Supabase for that.
 Keep it awake with a free monitor (e.g. UptimeRobot) that opens the address every 5 minutes.
+
+## Production on Render + Supabase
+
+1. Supabase: create a project and a **private** bucket `clinic-documents`. Copy the **Session pooler** connection string, the Project URL and the `service_role` key.
+2. Render → **New → Blueprint** → this repo → **Blueprint path** `render.production.yaml`.
+3. Fill `DATABASE_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY` and `APP_URL` (email and AI are optional) → **Apply**.
+4. Open the address, **Create account**, and set up the clinic. Tables are created on first start.
+
+The clinic's time zone is India by default; set `CLINIC_TZ` (e.g. `Asia/Dubai`) for another place.
+New patients are registered only with their consent, which is recorded with the date.

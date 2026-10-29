@@ -20,7 +20,7 @@ def test_screen_rules_on_the_server():
                                                     "token_timing": "booking", "sessions": [{"start": "00:00", "end": "23:59"}]})
         doc = c.get("/api/me", headers=h).json()["member"]["id"]
         _, rh = join(c, h, "Front Desk", "fd@x.in", "staff", ["operations"])
-        p = c.post("/api/patients", headers=rh, json={"name": "Pat"}).json()
+        p = c.post("/api/patients", headers=rh, json={"consent": True, "name": "Pat"}).json()
         v = c.post("/api/visits/walk-in", headers=rh, json={"patient_id": p["id"], "doctor_id": doc, "payment_method": "cash"}).json()
         c.post(f"/api/visits/{v['id']}/start", headers=h)
         c.put(f"/api/visits/{v['id']}/text", headers=h, json={"text": "Fever for two days."})

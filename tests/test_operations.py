@@ -20,7 +20,7 @@ def setup(c, email, timing="booking"):
 
 
 def patient(c, h, name):
-    return c.post("/api/patients", headers=h, json={"name": name}).json()["id"]
+    return c.post("/api/patients", headers=h, json={"consent": True, "name": name}).json()["id"]
 
 
 def test_two_sessions_have_their_own_tokens():

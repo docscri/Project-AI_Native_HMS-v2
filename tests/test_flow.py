@@ -30,8 +30,8 @@ def test_full_flow():
         doc = c.get("/api/me", headers=h).json()["member"]["id"]
 
         # Patients
-        p1 = c.post("/api/patients", headers=mh, json={"name": "Ravi", "phone": "9999999999"}).json()
-        p2 = c.post("/api/patients", headers=mh, json={"name": "Anil", "phone": "8888888888"}).json()
+        p1 = c.post("/api/patients", headers=mh, json={"consent": True, "name": "Ravi", "phone": "9999999999"}).json()
+        p2 = c.post("/api/patients", headers=mh, json={"consent": True, "name": "Anil", "phone": "8888888888"}).json()
         assert p1["uhid"] == "AC-0001"
 
         # Booking with token at booking; the duplicate is refused; a chosen token works
@@ -79,7 +79,7 @@ def test_full_flow():
         # Token at arrival: booking has no token, arrival assigns the next one
         c.put("/api/clinic/rules", headers=h, json={"fee": 300, "days": [0, 1, 2, 3, 4, 5, 6], "start": "00:00", "end": "23:59",
                                                     "limit_by": "patients", "limit_value": 30, "token_timing": "arrival"})
-        p3 = c.post("/api/patients", headers=mh, json={"name": "Lata"}).json()
+        p3 = c.post("/api/patients", headers=mh, json={"consent": True, "name": "Lata"}).json()
         b3 = c.post("/api/visits", headers=mh, json={"patient_id": p3["id"], "doctor_id": doc, "date": TODAY}).json()
         assert b3["token"] is None
         a3 = c.post(f"/api/visits/{b3['id']}/arrive", headers=mh, json={"payment_method": "card"}).json()

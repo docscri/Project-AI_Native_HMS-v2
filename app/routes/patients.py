@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from ..auth import require_any, require_screen
-from ..db import get_db, log_event, row, rows
+from ..db import get_db, log_event, now, row, rows
 from .clinic import clean_phone
 
 router = APIRouter(prefix="/api/patients")
@@ -18,6 +18,7 @@ class PatientIn(BaseModel):
     sex: str | None = None
     phone: str = ""
     address: str = ""
+    consent: bool = False   # patient agreed to the clinic keeping their health records
 
 
 class PatientEdit(BaseModel):
@@ -81,13 +82,16 @@ def check(name: str = "", phone: str = "", dob: str | None = None, me=Depends(re
 
 @router.post("")
 def register(body: PatientIn, me=Depends(require_any("operations", "patients", "consultation")), db=Depends(get_db)):
+    if not body.consent:
+        raise HTTPException(422, "Patient consent is needed.")
     data = clean(body)
+    data.pop("consent", None)
     db.lock(f"uhid:{me['clinic_id']}")
     c = row(db.execute("select uhid_prefix, next_uhid from clinics where id = ?", (me["clinic_id"],)).fetchone())
     uhid = f'{c["uhid_prefix"]}-{c["next_uhid"]:04d}'
     db.execute("update clinics set next_uhid = next_uhid + 1 where id = ?", (me["clinic_id"],))
-    pid = db.execute("insert into patients (clinic_id, uhid, name, dob, sex, phone, address) values (?, ?, ?, ?, ?, ?, ?)",
-                     (me["clinic_id"], uhid, data["name"], data.get("dob"), data.get("sex"), data.get("phone", ""), data.get("address", ""))).lastrowid
+    pid = db.execute("insert into patients (clinic_id, uhid, name, dob, sex, phone, address, consent_at) values (?, ?, ?, ?, ?, ?, ?, ?)",
+                     (me["clinic_id"], uhid, data["name"], data.get("dob"), data.get("sex"), data.get("phone", ""), data.get("address", ""), now())).lastrowid
     log_event(db, me["clinic_id"], me["id"], "patient", pid, "registered")
     return get_patient(db, me, pid) | {"similar": similar(db, me["clinic_id"], data["name"], data.get("phone", ""), data.get("dob"), pid)}
 

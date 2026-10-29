@@ -18,7 +18,7 @@ def test_parallel_bookings_get_unique_tokens_and_uhids():
         doc = c.get("/api/me", headers=h).json()["member"]["id"]
 
         with ThreadPoolExecutor(8) as pool:
-            patients = list(pool.map(lambda i: c.post("/api/patients", headers=h, json={"name": f"P{i}"}).json(), range(12)))
+            patients = list(pool.map(lambda i: c.post("/api/patients", headers=h, json={"consent": True, "name": f"P{i}"}).json(), range(12)))
         assert len({p["uhid"] for p in patients}) == 12
 
         with ThreadPoolExecutor(8) as pool:

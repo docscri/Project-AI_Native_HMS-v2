@@ -945,3 +945,4 @@ table.members tr.click:hover td:first-child b { text-decoration-color: var(--ink
 .cx-float .dock-stop { width: 42px; height: 42px; box-shadow: 0 0 0 5px color-mix(in srgb, var(--coral) 22%, transparent); }
 .cx-float .dock-wave { height: 32px; }
 .cx.re .cx-card, .cx.re .dock, .cx.re .cx-pane { animation: none; }
+.consent-line { font-size: 12.5px; }
