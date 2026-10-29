@@ -58,3 +58,20 @@ def test_address_and_owner_edit_during_setup():
         assert c.post("/api/auth/login", json={"email": "new@x.in", "password": "newpass123"}).status_code == 200
         c.post("/api/onboarding/finish", headers=h)
         assert c.put("/api/onboarding/owner", headers=h, json={"name": "X", "email": "new@x.in"}).status_code == 403
+
+
+def test_free_text_space():
+    with TestClient(app) as c:
+        h, doc = owner(c, "free@x.in")
+        p = c.post("/api/patients", headers=h, json={"name": "Free Text"}).json()
+        v = c.post("/api/visits/walk-in", headers=h, json={"patient_id": p["id"], "doctor_id": doc, "payment_method": "cash"}).json()
+        assert c.put(f"/api/visits/{v['id']}/text", headers=h, json={"text": "x"}).status_code == 409
+        c.post(f"/api/visits/{v['id']}/start", headers=h)
+        text = "Fever and cough since Monday.\nTemp 101 F, BP 120/80.\nLooks like viral fever. Paracetamol 650 mg twice daily for 3 days."
+        assert c.put(f"/api/visits/{v['id']}/text", headers=h, json={"text": text}).status_code == 200
+        assert c.get(f"/api/visits/{v['id']}", headers=h).json()["text"] == text
+        n = c.post(f"/api/visits/{v['id']}/note/draft", headers=h).json()
+        assert "Fever" in n["content"]["soap"]["S"] and "Paracetamol" in n["content"]["rx"][0]["medicine"]
+        assert n["citations"]["A"] == ["T3"]
+        c.post(f"/api/notes/{n['id']}/sign", headers=h)
+        assert c.put(f"/api/visits/{v['id']}/text", headers=h, json={"text": "late edit"}).status_code == 409

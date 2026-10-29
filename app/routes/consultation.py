@@ -6,7 +6,7 @@ from datetime import date as Date
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .. import ai, storage
 from ..auth import current_member, member_for_token, require_screen
@@ -54,7 +54,7 @@ def evidence_for(db, v: dict) -> tuple[dict, list[dict]]:
     p = row(db.execute("select * from patients where id = ?", (v["patient_id"],)).fetchone())
     patient = {"name": p["name"], "age": age(p["dob"]), "sex": p["sex"]}
     docs = [d for d in load_docs(db, v["patient_id"]) if d["ai_status"] == "ready"]
-    return patient, ai.evidence(json.loads(v["transcript"]), docs, past_notes(db, v["patient_id"], v["id"]))
+    return patient, ai.evidence(text_of(v), docs, past_notes(db, v["patient_id"], v["id"]))
 
 
 # ---------- list + workspace ----------
@@ -100,7 +100,7 @@ def workspace(visit_id: int, me=Depends(current_member), db=Depends(get_db)):
     v = get_visit(db, me, visit_id)
     out = visit_rows(db, me, "v.id = ?", (visit_id,))[0]
     out["age"] = age(out["dob"])
-    out["transcript"] = json.loads(v["transcript"])
+    out["text"] = text_of(v)
     out["brief"] = json.loads(v["brief"]) if v["brief"] else None
     out["documents"] = load_docs(db, v["patient_id"])
     out["note"] = load_note(db, visit_id)
@@ -121,6 +121,34 @@ def make_brief(visit_id: int, me=Depends(doctor_screen), db=Depends(get_db)):
 
 # ---------- dictation ----------
 
+def text_of(v: dict) -> str:
+    """The visit's free text. Visits from before the shared space keep their dictated lines, joined."""
+    if v.get("dictation"):
+        return v["dictation"]
+    return "\n".join(s["text"] for s in json.loads(v["transcript"] or "[]"))
+
+
+class FreeText(BaseModel):
+    text: str = Field(max_length=100_000)
+
+
+def editable(db, v: dict) -> None:
+    if v["status"] != "with_doctor":
+        raise HTTPException(409, "Start the consultation first.")
+    n = load_note(db, v["id"])
+    if n and n["status"] == "signed":
+        raise HTTPException(409, "Note is signed.")
+
+
+@router.put("/visits/{visit_id}/text")
+def save_text(visit_id: int, body: FreeText, me=Depends(doctor_screen), db=Depends(get_db)):
+    """The one writing space: typed and dictated text together, saved as the doctor works."""
+    v = get_visit(db, me, visit_id)
+    editable(db, v)
+    db.execute("update visits set dictation = ? where id = ?", (body.text, visit_id))
+    return {"ok": True, "length": len(body.text)}
+
+
 class Segment(BaseModel):
     speaker: str = "Doctor"
     text: str
@@ -128,14 +156,12 @@ class Segment(BaseModel):
 
 @router.post("/visits/{visit_id}/transcript")
 def add_segment(visit_id: int, body: Segment, me=Depends(doctor_screen), db=Depends(get_db)):
-    """The browser sends each finished sentence (speech recognition or typed)."""
+    """Adds a line at the end of the visit's text (older clients and scripts)."""
     v = get_visit(db, me, visit_id)
-    if v["status"] != "with_doctor":
-        raise HTTPException(409, "Start the consultation first.")
-    t = json.loads(v["transcript"])
-    t.append({"id": f"T{len(t) + 1}", "speaker": body.speaker, "text": body.text.strip(), "at": now()})
-    db.execute("update visits set transcript = ? where id = ?", (json.dumps(t), visit_id))
-    return t
+    editable(db, v)
+    text = (text_of(v).rstrip() + "\n" + body.text.strip()).strip()
+    db.execute("update visits set dictation = ? where id = ?", (text, visit_id))
+    return {"text": text}
 
 
 # ---------- documents ----------

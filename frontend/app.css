@@ -813,3 +813,9 @@ table.members tr.click:hover td:first-child b { text-decoration-color: var(--ink
 .board .card .acts { padding-top: 4px; }
 .cx-top-right { display: flex; align-items: center; gap: 10px; }
 .wl-row { grid-template-columns: 40px minmax(0, 1fr) minmax(0, 1fr) auto !important; }
+
+/* transcript: one space for typing and dictation, same look as before */
+.live-edit { display: block; width: 100%; min-height: 52vh; border: 0; outline: none; resize: none; background: transparent; padding: 0;
+  font-family: inherit; font-size: clamp(20px, 2.4vw, 26px); font-weight: 500; line-height: 1.6; color: var(--ink); overflow-y: auto; scrollbar-width: none; caret-color: var(--coral); }
+.live-edit::-webkit-scrollbar { display: none; }
+.live-edit::selection { background: var(--lime); }

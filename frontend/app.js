@@ -591,6 +591,8 @@ async function viewConsult(visitId, doctorParam, patientParam) {
 const refreshConsult = () => S.reloadConsult && run(S.reloadConsult);
 function renderConsult() {
   const D = S.data, m = S.me, v = D.cur;
+  const fe = $("#free-text"); if (fe && S.ft?.id === Number(fe.dataset.v)) { S.ft.sel = document.activeElement === fe ? fe.selectionEnd : null; S.ft.scroll = fe.scrollTop; }
+  if (S.ft && S.ft.id !== v?.id) { saveText(S.ft.id); S.ft = null; }
   const floatMic = v && ["waiting", "with_doctor"].includes(v.status) && S.ctab !== "note";
   $("#root").innerHTML = `<div class="cx">
     <header class="cx-top">
@@ -608,9 +610,14 @@ function renderConsult() {
       ${S.rightCollapsed ? "" : `<aside class="cx-right">${rightCol()}</aside>`}
     </div>
   </div>`;
-  const tr = $(".transcript"); if (tr) tr.scrollTop = tr.scrollHeight;
+  restoreFree();
   clearTimeout(S.docT);
   if (v?.documents.some(d => d.ai_status === "processing")) S.docT = setTimeout(refreshConsult, 2000);
+}
+function restoreFree() {
+  const el = $("#free-text"); if (!el || !S.ft || S.ft.id !== Number(el.dataset.v)) return;
+  if (S.ft.sel != null) { el.focus({ preventScroll: true }); el.setSelectionRange(S.ft.sel, S.ft.sel); }
+  if (S.ft.scroll) el.scrollTop = S.ft.scroll;
 }
 function micBtn(v, small) {
   return `<button class="mic-dot ${small ? "sm" : ""} ${S.rec ? "on" : ""}" data-a="cs-mic" data-v="${v.id}" aria-label="${S.rec ? "Stop dictation" : "Dictate"}">${icon.mic}</button>${S.rec ? `<span class="mic-time" id="dock-timer">${S.recStart ? fmtClock(Date.now() - S.recStart) : "0:00"}</span>` : ""}`;
@@ -657,20 +664,13 @@ function paneBrief(v) {
     ${rest.length ? `<div class="cx-events">${rest.map(i => `<div class="${i.flag ? "flag" : ""}"><span>${i.flag ? "⚠" : "•"}</span><span>${esc(i.text)}${citeBtns(i.cites)}</span></div>`).join("")}</div>` : ""}`;
 }
 function paneDictate(v) {
-  const n = v.note, signed = n?.status === "signed";
-  const write = v.status === "with_doctor" || n;
-  const side = !write ? "" : n ? `<div class="hand-note">${signed ? `<div class="result">✓ Signed</div>` : ""}${noteEditor(n, signed)}
-      ${signed ? "" : `<div class="foot"><button class="btn" data-a="note-save" data-v="${n.id}">Save draft</button><button class="btn primary" data-a="note-sign" data-v="${n.id}">Sign &amp; complete</button></div>`}</div>`
-    : `<div class="hand-note empty-note"><button class="btn" data-a="note-blank" data-v="${v.id}">Write note</button></div>`;
-  return `<div class="${write ? "dict-split" : ""}"><div>${transcriptText(v)}</div>${side}</div>`;
+  const n = v.note, can = v.status === "with_doctor" && n?.status !== "signed";
+  return `<textarea class="live-text live-edit" id="free-text" data-a="free-text" data-v="${v.id}" spellcheck="true" aria-label="Transcript" ${can ? "" : "readonly"}>${esc(freeText(v))}</textarea>`;
 }
-function transcriptText(v) {
-  return `<div class="live-text">${v.transcript.map(s => `<span class="live-seg" id="ev-${s.id}">${esc(s.text)} </span>`).join("")}<span class="live-interim" id="live-interim">${esc(S.interim || "")}</span>${S.rec ? `<span class="live-cursor"></span>` : ""}</div>`;
-}
-const seg = s => `<span class="live-seg" id="ev-${s.id}">${esc(s.text)} </span>`;
+const freeText = v => S.ft?.id === v.id ? S.ft.text : (v.text || "");
 function paneNote(v) {
   const n = v.note, signed = n?.status === "signed";
-  const canDraft = v.status === "with_doctor" && (v.transcript.length || v.documents.some(d => d.ai_status === "ready"));
+  const canDraft = v.status === "with_doctor" && (freeText(v).trim() || v.documents.some(d => d.ai_status === "ready"));
   const live = ["waiting", "with_doctor"].includes(v.status);
   return `<div class="cx-sec"><span class="label">Clinical note</span><span class="actions" style="gap:8px;align-items:center">
       ${!signed && canDraft ? `<button class="cx-pill-btn" data-a="cs-draft" data-v="${v.id}">${n ? "Re-draft" : "✦ Draft with AI"}</button>` : ""}
@@ -690,7 +690,7 @@ function rightCol() {
     <div class="cx-row"><span>Visits</span><b>${p.visits.filter(x => x.status === "done").length}</b></div></div>`;
 }
 function sourceOf(v, id) {
-  if (id.startsWith("T")) { const s = v.transcript.find(x => x.id === id); return s && { kind: "Transcript", text: `${s.speaker}: ${s.text}` }; }
+  if (id.startsWith("T")) { const p = paragraphs(freeText(v))[Number(id.slice(1)) - 1]; return p && { kind: "Transcript", text: p.text }; }
   if (id.startsWith("D")) { const d = v.documents.find(x => "D" + x.id === id); return d && { kind: "Document", text: d.filename + (d.extracted?.findings?.length ? " — " + d.extracted.findings.slice(0, 3).map(f => `${f.name} ${f.value} ${f.unit || ""}`.trim()).join(", ") : "") }; }
   if (id.startsWith("N")) return { kind: "Earlier note", text: "Signed note from a previous visit" };
   return null;
@@ -723,22 +723,43 @@ function startMic(visitId) {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) { refreshConsult(); return toast("Use Chrome to dictate", true); }
   const r = new SR(); r.lang = "en-IN"; r.continuous = true; r.interimResults = true;
+  S.dict = null;
   r.onresult = e => {
+    const el = $("#free-text"); if (!el || el.readOnly) return;
+    if (!S.dict || (!S.dict.len && document.activeElement === el)) S.dict = { start: document.activeElement === el ? el.selectionEnd : el.value.length, len: 0 };
     let interim = "";
     for (let i = e.resultIndex; i < e.results.length; i++) {
-      if (e.results[i].isFinal) { S.interim = ""; addLine(visitId, e.results[i][0].transcript); } else interim += e.results[i][0].transcript;
+      const said = e.results[i][0].transcript.trim();
+      if (e.results[i].isFinal) { if (said) putSpeech(el, said + " ", true); } else interim += (interim ? " " : "") + said;
     }
-    S.interim = interim; const el = $("#live-interim"); if (el) el.textContent = interim;
+    if (interim) putSpeech(el, interim, false);
+    S.ft = { id: visitId, text: el.value };
+    scheduleSave(visitId);
   };
-  r.onend = () => { if (S.rec === r) { S.rec = null; S.recStart = null; clearInterval(S.recT); refreshConsult(); } };
-  r.onerror = e => toast("Mic: " + e.error, true);
+  r.onend = () => { if (S.rec === r) { S.rec = null; S.recStart = null; clearInterval(S.recT); S.dict = null; saveText(visitId).then(refreshConsult); } };
+  r.onerror = e => e.error !== "no-speech" && toast("Mic: " + e.error, true);
   S.rec = r; S.recStart = Date.now(); clearInterval(S.recT); S.recT = setInterval(() => { const t = $("#dock-timer"); if (t && S.recStart) t.textContent = fmtClock(Date.now() - S.recStart); }, 500); r.start(); refreshConsult();
 }
-async function addLine(visitId, text) {
-  if (!text.trim()) return;
-  await run(() => api(`/visits/${visitId}/transcript`, { body: { speaker: S.speaker || "Doctor", text } }));
-  refreshConsult();
+// Spoken words go where the cursor is. Words still being recognised are replaced as they firm up.
+function putSpeech(el, text, final) {
+  const d = S.dict, before = el.value.slice(0, d.start);
+  const pad = before && !/\s$/.test(before) ? " " : "";
+  if (!before.trim() || /[.!?]\s*$/.test(before)) text = text.charAt(0).toUpperCase() + text.slice(1);
+  el.setRangeText(pad + text, d.start, d.start + d.len, "end");
+  if (final) { d.start += pad.length + text.length; d.len = 0; } else d.len = pad.length + text.length;
+  if (document.activeElement === el) el.setSelectionRange(d.start + d.len, d.start + d.len);
 }
+const paragraphs = text => { const out = []; let at = 0; for (const line of text.split("\n")) { if (line.trim()) out.push({ text: line.trim(), from: at, to: at + line.length }); at += line.length + 1; } return out; };
+function scheduleSave(visitId) { clearTimeout(S.ftT); S.ftT = setTimeout(() => saveText(visitId), 700); }
+async function saveText(visitId) {
+  clearTimeout(S.ftT);
+  const ft = S.ft; if (!ft || ft.id !== visitId || ft.saved === ft.text) return;
+  const text = ft.text;
+  await run(() => api(`/visits/${visitId}/text`, { method: "PUT", body: { text } }));
+  if (S.ft === ft) ft.saved = text;
+  if (S.data?.cur?.id === visitId) S.data.cur.text = text;
+}
+const flushText = () => S.ft ? saveText(S.ft.id) : Promise.resolve();
 
 /* ---------- patients ---------- */
 async function viewPatients(id) {
@@ -826,7 +847,7 @@ document.addEventListener("click", e => {
   const t = e.target.closest("[data-a]"); if (!t) return;
   const a = t.dataset.a, v = t.dataset.v;
   if (a === "scrim") { if (e.target === t && M?.kind !== "sched") closeModal(); return; }
-  if (["lim", "up-file", "mg-q", "vf-q", "vf-doc", "pay-disc", "bk-q", "pt-q", "cs-q", "bk-date", "bk-doc", "sc-doc", "sc-month-picker", "sc-year-picker", "cs-doc"].includes(a)) return;
+  if (["lim", "free-text", "up-file", "mg-q", "vf-q", "vf-doc", "pay-disc", "bk-q", "pt-q", "cs-q", "bk-date", "bk-doc", "sc-doc", "sc-month-picker", "sc-year-picker", "cs-doc"].includes(a)) return;
   e.preventDefault();
   const D = S.data;
   run(async () => {
@@ -943,11 +964,11 @@ document.addEventListener("click", e => {
       case "pt-open": go(`#/patients/${v}`); break;
       case "pt-edit": openPatientEdit(await api(`/patients/${v}`)); break;
       case "pe-save": await api(`/patients/${M.id}`, { method: "PATCH", body: { name: $("#pe-name").value, phone: $("#pe-phone").value, dob: $("#pe-dob").value || null, sex: $("#pe-sex").value, address: $("#pe-addr").value } }); closeModal(); toast("Saved"); route(); break;
-      case "cs-tab": if (D.cur?.note && $("#soap-S")) D.cur.note.content = readNote(); S.ctab = v; renderConsult(); break;
+      case "cs-tab": await flushText(); if (D.cur?.note && $("#soap-S")) D.cur.note.content = readNote(); S.ctab = v; renderConsult(); break;
       case "cs-side": S.cside = v; renderConsult(); break;
       case "cs-left": S.cleft = v; refreshConsult(); break;
       case "cs-patient": go(`#/consult?doctor=${D.doctorId}&patient=${v}`); break;
-      case "cs-draft-go": await api(`/visits/${v}/note/draft`, { body: {} }); S.ctab = "note"; toast("Draft ready."); refreshConsult(); break;
+      case "cs-draft-go": await flushText(); await api(`/visits/${v}/note/draft`, { body: {} }); S.ctab = "note"; toast("Draft ready."); refreshConsult(); break;
       case "note-sign-ro": await api(`/notes/${v}`, { method: "PUT", body: D.cur.note.content }); await api(`/notes/${v}/sign`, { body: {} }); toast("Signed. Visit complete."); refreshConsult(); break;
       case "cs-next-mic": { const r = await api(`/consultation/next?doctor_id=${v}`, { body: {} }); S.ctab = "dictate"; await new Promise(res => { const once = () => { window.removeEventListener("hashchange", once); setTimeout(res, 300); }; window.addEventListener("hashchange", once); go(`#/consult/${r.id}?doctor=${v}`); }); startMic(r.id); break; }
       case "cs-collapse": S.rightCollapsed = !S.rightCollapsed; renderConsult(); break;
@@ -961,18 +982,19 @@ document.addEventListener("click", e => {
       case "cs-open": go(`#/consult/${v}?doctor=${D.doctorId}`); break;
       case "cs-start": await api(`/visits/${v}/start`, { body: {} }); refreshConsult(); break;
       case "cs-brief": await api(`/visits/${v}/brief`, { body: {} }); toast("Brief updated"); refreshConsult(); break;
-      case "cs-draft": await api(`/visits/${v}/note/draft`, { body: {} }); S.ctab = "note"; toast("Draft ready."); refreshConsult(); break;
+      case "cs-draft": await flushText(); await api(`/visits/${v}/note/draft`, { body: {} }); S.ctab = "note"; toast("Draft ready."); refreshConsult(); break;
       case "mic": if (S.rec) { const r = S.rec; S.rec = null; S.recStart = null; clearInterval(S.recT); r.stop(); refreshConsult(); } else { S.ctab = "dictate"; startMic(Number(v)); } break;
       case "spk": S.speaker = v; document.querySelectorAll('[data-a="spk"]').forEach(b => b.setAttribute("aria-pressed", b.dataset.v === v)); break;
-      case "dict-add": { const i = $("#dict-in"); await addLine(Number(v), i.value); break; }
       case "rx-add": { const n = D.cur.note; n.content = readNote(); n.content.rx.push({ medicine: "", dose: "", duration: "", instructions: "" }); rerenderNote(); break; }
       case "rx-del": { const n = D.cur.note; n.content = readNote(); n.content.rx.splice(Number(v), 1); rerenderNote(); break; }
-      case "note-blank": await api(`/visits/${v}/note`, { body: {} }); refreshConsult(); break;
       case "note-save": await api(`/notes/${v}`, { method: "PUT", body: readNote() }); toast("Draft saved"); refreshConsult(); break;
       case "note-sign": await api(`/notes/${v}`, { method: "PUT", body: readNote() }); await api(`/notes/${v}/sign`, { body: {} }); toast("Signed. Visit complete."); refreshConsult(); break;
       case "print": window.open(`/api/notes/${v}/print?token=${encodeURIComponent(S.token)}`, "_blank"); break;
       case "open-doc": { const res = await fetch(`/api/documents/${v}/file`, { headers: { Authorization: "Bearer " + S.token } }); window.open(URL.createObjectURL(await res.blob()), "_blank"); break; }
-      case "cite": { const el = document.getElementById("ev-" + v); if (el) { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); el.classList.add("hl"); setTimeout(() => el.classList.remove("hl"), 1800); } else toast(v.startsWith("N") ? "From an earlier note." : "Source: " + v); break; }
+      case "cite": if (v.startsWith("T")) { const p = paragraphs(freeText(D.cur))[Number(v.slice(1)) - 1]; if (!p) break;
+        if (S.ctab !== "dictate") { S.ctab = "dictate"; renderConsult(); }
+        const ta = $("#free-text"); ta.focus(); ta.setSelectionRange(p.from, p.to); break; }
+      { const el = document.getElementById("ev-" + v); if (el) { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); el.classList.add("hl"); setTimeout(() => el.classList.remove("hl"), 1800); } else toast(v.startsWith("N") ? "From an earlier note." : "Source: " + v); break; }
     }
   });
 });
@@ -983,11 +1005,12 @@ function payShow() {
   if (rw) rw.hidden = !(w || disc > 0);
   if (due) due.textContent = rupees(w ? 0 : Math.max(0, fee - disc));
 }
-function rerenderNote() { const c = $("#cx-center"); if (c) c.innerHTML = center(); }
+function rerenderNote() { const c = $("#cx-center"); if (c) c.innerHTML = center(); restoreFree(); }
 document.addEventListener("input", e => {
   const a = e.target.dataset?.a;
   if (a === "bk-q") searchPatients(e.target.value);
   if (a === "pay-disc") payShow();
+  if (a === "free-text") { const id = Number(e.target.dataset.v); S.ft = { ...(S.ft?.id === id ? S.ft : {}), id, text: e.target.value }; if (S.dict) S.dict = { start: e.target.selectionEnd, len: 0 }; scheduleSave(id); }
   if (a === "up-file") { const f = e.target.files[0]; $("#up-name").textContent = f ? f.name : "No file"; $(".file-drop").classList.toggle("has", !!f); }
   if (a === "mg-q") { M.q = e.target.value; clearTimeout(searchT); searchT = setTimeout(() => run(async () => { if (M?.kind !== "merge") return; M.results = M.q.trim() ? await api(`/patients?q=${encodeURIComponent(M.q)}`) : []; renderMerge(); }), 180); }
   if (a === "vf-q") { S.vf.q = e.target.value; const r = $("#ops-rows"); if (r && S.data?.visits) r.innerHTML = opsRows(S.data.visits); }
@@ -1011,7 +1034,6 @@ document.addEventListener("change", e => {
 });
 document.addEventListener("keydown", e => {
   if (e.key === "Escape" && M) { closeModal(); if (M === null) refresh(); }
-  if (e.key === "Enter" && e.target.id === "dict-in") { e.preventDefault(); run(() => addLine(Number(e.target.dataset.v), e.target.value)); }
 });
 
 /* ---------- enhancers: labels inside boxes, rounded dropdowns, calendar picker ---------- */

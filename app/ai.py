@@ -43,9 +43,10 @@ def extract_document(data: bytes, mime: str, filename: str) -> dict:
 
 # ---------- evidence ----------
 
-def evidence(transcript: list[dict], documents: list[dict], past_notes: list[dict]) -> list[dict]:
-    """Everything the AI may use, each with a stable id it must cite."""
-    items = [{"id": s["id"], "kind": "transcript", "text": f'{s["speaker"]}: {s["text"]}'} for s in transcript]
+def evidence(text: str, documents: list[dict], past_notes: list[dict]) -> list[dict]:
+    """Everything the AI may use, each with a stable id it must cite. The free text is cited by paragraph (T1, T2...)."""
+    paras = [p.strip() for p in re.split(r"\n+", text or "") if p.strip()]
+    items = [{"id": f"T{i + 1}", "kind": "transcript", "text": p} for i, p in enumerate(paras)]
     for d in documents:
         ex = d.get("extracted") or {}
         vals = ", ".join(f'{f["name"]} {f["value"]} {f.get("unit", "")}'.strip() for f in ex.get("findings", []))
@@ -110,22 +111,21 @@ def draft_note(patient: dict, items: list[dict]) -> dict:
     for i in items:
         if i["kind"] != "transcript":
             continue
-        speaker, _, text = i["text"].partition(": ")
-        low = text.lower()
-        if any(w in low for w in ("likely", "looks like", "diagnos", "this is", "suggest")):
-            k = "A"
-        elif re.search(r"\d", low) and any(w in low for w in ("bp", "temp", "weight", "pulse", "report", "hba1c", "sugar", "spo2", "°")):
-            k = "O"
-        elif speaker.lower() != "doctor":
-            k = "S"
-        elif any(w in low for w in ("mg", "ml", "tablet", "syrup", "review", "come back", "follow", "advice", "walk", "drink", "test")):
-            k = "P"
-        else:
-            k = "O" if re.search(r"\d", low) else "S"
-        soap[k].append(text.rstrip(".") + ".")
-        cites[k].append(i["id"])
-        for m in MED.finditer(text):
-            freq, dur = FREQ.search(text), DURATION.search(text)
-            rx.append({"medicine": f"{m.group(1).title()} {m.group(2)}", "dose": freq.group(0) if freq else "as advised",
-                       "duration": dur.group(1) if dur else "", "instructions": ""})
+        for text in [x for x in re.split(r"(?<=[.!?])\s+", i["text"]) if x.strip()]:
+            low = text.lower()
+            if any(w in low for w in ("likely", "looks like", "diagnos", "this is", "suggest")):
+                k = "A"
+            elif re.search(r"\d", low) and any(w in low for w in ("bp", "temp", "weight", "pulse", "report", "hba1c", "sugar", "spo2", "°")):
+                k = "O"
+            elif any(w in low for w in ("mg", "ml", "tablet", "syrup", "review", "come back", "follow", "advice", "walk", "drink", "test")):
+                k = "P"
+            else:
+                k = "O" if re.search(r"\d", low) else "S"
+            soap[k].append(text.rstrip(".") + ".")
+            if i["id"] not in cites[k]:
+                cites[k].append(i["id"])
+            for m in MED.finditer(text):
+                freq, dur = FREQ.search(text), DURATION.search(text)
+                rx.append({"medicine": f"{m.group(1).title()} {m.group(2)}", "dose": freq.group(0) if freq else "as advised",
+                           "duration": dur.group(1) if dur else "", "instructions": ""})
     return {"soap": {k: " ".join(v) for k, v in soap.items()}, "rx": rx, "citations": cites}
