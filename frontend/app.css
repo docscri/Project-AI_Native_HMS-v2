@@ -808,3 +808,9 @@ table.members tr.click:hover td:first-child b { text-decoration-color: var(--ink
 .modal.re, .modal.re * { animation: none !important; }
 .save-row { display: flex; justify-content: flex-end; margin-top: 4px; }
 .scrim:has(.modal.re) { animation: none; }
+
+/* no divider lines anywhere: spacing separates things instead */
+.me, .panel > .label, .r, table.t th, table.t td, .cx-kv, .cx-row, .cx-hist > div:not(.cx-row), .booking-dialog .foot, .board .card .acts, .foot { border-top: 0 !important; border-bottom: 0 !important; }
+.r { padding: 10px 0; }
+.panel > .label { padding-bottom: 2px; }
+.board .card .acts { padding-top: 4px; }
