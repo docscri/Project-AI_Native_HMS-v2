@@ -605,7 +605,7 @@ function renderConsult() {
       <span class="cx-chip solid">${m.kind === "doctor" ? "Doctor" : esc(m.designation || "Staff")}</span>
       <button class="cx-avatar" data-a="account" title="Account">${esc(firstName(m.name)[0].toUpperCase())}</button>
     </header>
-    <div class="cx-body ${S.rightCollapsed ? "wide" : ""}"><button class="cx-collapse" data-a="cs-collapse" aria-label="${S.rightCollapsed ? "Show side panel" : "Hide side panel"}" title="${S.rightCollapsed ? "Show side panel" : "Hide side panel"}"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${S.rightCollapsed ? "M15 6l-6 6 6 6" : "M9 6l6 6-6 6"}"/></svg></button>
+    <div class="cx-body ${S.rightCollapsed ? "wide" : ""}">
       <aside class="cx-left">${leftCol()}</aside>
       <main class="cx-center" id="cx-center">${center()}${floatMic ? `<div class="cx-float">${dock(v)}</div>` : v && S.ctab === "note" ? `<div class="cx-float">${noteDock(v)}</div>` : ""}</main>
       ${S.rightCollapsed ? "" : `<aside class="cx-right">${rightCol()}</aside>`}
@@ -639,6 +639,7 @@ function dock(v) {
     return `<div class="dock"><span class="dock-msg">Transcript finalized.</span><span class="grow"></span><button class="dock-ghost" data-a="cs-mic" data-v="${v.id}">Dictate more</button><button class="dock-go" data-a="cs-draft" data-v="${v.id}">Generate SOAP note</button></div>`;
   return micBtn(v);
 }
+const sideBtn = () => `<button class="cx-side-btn" data-a="cs-collapse" aria-label="${S.rightCollapsed ? "Show side panel" : "Hide side panel"}" title="${S.rightCollapsed ? "Show side panel" : "Hide side panel"}"><i></i><i></i></button>`;
 function micBtn(v, small) {
   return `<button class="mic-dot ${small ? "sm" : ""}" data-a="cs-mic" data-v="${v.id}" aria-label="Dictate">${icon.mic}</button>`;
 }
@@ -664,14 +665,14 @@ function center() {
     if (!p) return `<div class="cx-card cx-blank"></div>`;
     const past = p.visits.filter(x => x.status === "done");
     return `<div class="cx-card"><div class="cx-head"><div><h1>${esc(p.name)}${p.dob ? ", " + ageOf(p.dob) : ""}</h1>
-      <p class="muted">${{ M: "Male", F: "Female", O: "Other" }[p.sex] || ""} · ${esc(p.uhid)}</p></div></div>
+      <p class="muted">${{ M: "Male", F: "Female", O: "Other" }[p.sex] || ""} · ${esc(p.uhid)}</p></div><span class="cx-top-right">${sideBtn()}</span></div>
       <div class="cx-events">${past.map(x => `<div><span>•</span><span><b>${longDate(x.date)}</b> · ${esc(x.note?.soap?.A || x.doctor)}</span></div>`).join("") || `<span class="muted">—</span>`}</div></div>`;
   }
   const stateLabel = { waiting: "Waiting", with_doctor: "In visit", done: "Signed", booked: "Booked" }[v.status];
   return `<div class="cx-card">
     <div class="cx-head"><div><h1>${esc(v.patient_name)}${v.age != null ? ", " + v.age : ""}</h1>
 </div>
-      <span class="cx-top-right">${["with_doctor", "done"].includes(v.status) ? `<button class="cx-pill-btn" data-a="fu-open" data-v="${v.id}">Follow-up</button>` : ""}<span class="cx-status st-${v.status}"><i></i>${stateLabel}</span></span></div>
+      <span class="cx-top-right">${["with_doctor", "done"].includes(v.status) ? `<button class="cx-pill-btn" data-a="fu-open" data-v="${v.id}">Follow-up</button>` : ""}<span class="cx-status st-${v.status}"><i></i>${stateLabel}</span>${sideBtn()}</span></div>
     <div class="cx-tabs">${CTABS.map(([k, l]) => `<button data-a="cs-tab" data-v="${k}" aria-pressed="${S.ctab === k}">${l}</button>`).join("")}</div>
     <div class="cx-pane">${({ brief: paneBrief, dictate: paneDictate, note: paneNote })[S.ctab](v)}</div>
   </div>`;

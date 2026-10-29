@@ -861,3 +861,7 @@ table.members tr.click:hover td:first-child b { text-decoration-color: var(--ink
 .note-gen i::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, #ffffff55, transparent); transform: translateX(-100%); animation: sweep 1.3s ease-in-out infinite; }
 .note-gen i:nth-of-type(2)::after { animation-delay: .15s; } .note-gen i:nth-of-type(3)::after { animation-delay: .3s; }
 @keyframes sweep { to { transform: translateX(100%); } }
+.cx-side-btn { width: 42px; height: 42px; border-radius: 50%; border: 1px solid #ffffff1f; background: var(--ink); display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 5px; padding-left: 12px; cursor: pointer; flex: none; transition: transform .2s, background .2s; }
+.cx-side-btn i { display: block; height: 2.5px; border-radius: 2px; background: var(--surface); width: 18px; }
+.cx-side-btn i + i { width: 11px; }
+.cx-side-btn:hover { transform: scale(1.06); }
