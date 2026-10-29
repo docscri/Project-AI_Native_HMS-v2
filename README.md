@@ -7,15 +7,15 @@ Runs on your laptop at `http://localhost:8050`. No database setup needed.
 You need **Python 3.10+** and **Git**. Check with `python --version`.
 
 ```bash
-git clone https://github.com/docscri/Project_HMS.git
-cd Project_HMS
+git clone https://github.com/docscri/Project-AI_Native_HMS.git
+cd Project-AI_Native_HMS
 pip install -r requirements.txt
 ```
 
 ## 2. Start
 
 ```bash
-cd Project_HMS
+cd Project-AI_Native_HMS
 python -m uvicorn app.main:app --port 8050
 ```
 
