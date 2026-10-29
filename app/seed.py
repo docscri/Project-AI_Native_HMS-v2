@@ -4,8 +4,9 @@ payments, attendance and leave.
 Run: python -m app.seed   (only seeds an empty database)
 Logins (password demo123): anjali@demo.in (owner, doctor) · rahul@demo.in (doctor) · meera@demo.in (receptionist) · tess@demo.in (nurse)
 """
-import random
 import json
+import os
+import random
 from datetime import date, datetime, timedelta
 
 from .auth import SCREENS, hash_password
@@ -41,6 +42,14 @@ def seed() -> bool:
     rahul = member("doctor", "Dr. Rahul Nair", "rahul@demo.in", ["patients", "consultation"], spec="Paediatrics", fee=400)
     meera = member("staff", "Meera Joseph", "meera@demo.in", ["operations", "patients"], desig="Receptionist")
     tess = member("staff", "Tess Mathew", "tess@demo.in", ["operations"], desig="Nurse")
+    # Your own login inside the demo clinic (Render: set DEMO_EMAIL, and optionally DEMO_PASSWORD and DEMO_NAME)
+    own = os.environ.get("DEMO_EMAIL", "").strip().lower()
+    if own and own not in ("anjali@demo.in", "rahul@demo.in", "meera@demo.in", "tess@demo.in"):
+        db.execute(
+            """insert into members (clinic_id, kind, is_owner, is_admin, name, email, password_hash, speciality, screens, status)
+               values (?, 'doctor', 0, 1, ?, ?, ?, 'General medicine', ?, 'active')""",
+            (cid, os.environ.get("DEMO_NAME", "").strip() or "Dr. Guest", own,
+             hash_password(os.environ.get("DEMO_PASSWORD", "").strip() or "demo123"), json.dumps(SCREENS)))
     joined = (date.today() - timedelta(days=14)).isoformat()
     db.execute("update members set joined_on = ?, phone = '98470 00000' where clinic_id = ?", (joined, cid))
 

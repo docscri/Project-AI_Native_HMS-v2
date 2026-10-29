@@ -1,0 +1,21 @@
+# Free demo on Render: SQLite + demo clinic, rebuilt fresh on every restart.
+# Render → New → Blueprint → this repo. For real clinic use, set DATABASE_URL and the SUPABASE_* keys instead.
+services:
+  - type: web
+    name: dictate-demo
+    runtime: python
+    plan: free
+    region: singapore
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: SEED_DEMO
+        value: "1"
+      - key: DEMO_EMAIL
+        sync: false
+      - key: DEMO_PASSWORD
+        sync: false
+      - key: DEMO_NAME
+        sync: false

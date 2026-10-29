@@ -48,6 +48,8 @@ Fills an **empty** database with a sample clinic: 2 doctors, 2 staff, patients, 
    - `meera@demo.in`: receptionist
    - `tess@demo.in`: nurse
 
+**Your own login in the demo:** also set `DEMO_EMAIL` (and optionally `DEMO_PASSWORD`, `DEMO_NAME`). That email is added as a doctor with full admin access. Without `DEMO_PASSWORD` the password is `demo123`.
+
 To go back to your own data, stop the app, delete the demo `data` folder and rename `data-mine` back to `data`.
 
 ## Use Supabase (recommended for a real clinic)
@@ -63,3 +65,9 @@ Keep `.env` private: it holds keys to your clinic's data.
 
 Fill the `SMTP_*` lines in `.env` (e.g. a Gmail app password) and set `APP_URL` to the address people open.
 Without email, admins copy invite and password-reset links from **Administration → Members** and send them on WhatsApp.
+
+## Demo on Render (free)
+
+`render.yaml` sets this up: Render → **New → Blueprint** → pick this repo → fill `DEMO_EMAIL` / `DEMO_PASSWORD` → **Apply**.
+It runs on SQLite with the demo clinic. Render's free disk is wiped on every restart or deploy, so the demo starts fresh each time (your login is added again automatically). Not for real patient data; use Supabase for that.
+Keep it awake with a free monitor (e.g. UptimeRobot) that opens the address every 5 minutes.
