@@ -925,3 +925,6 @@ table.members tr.click:hover td:first-child b { text-decoration-color: var(--ink
 .doc-table tr.tot-row td { background: var(--ink); color: var(--surface); }
 .doc-table tr.tot-row td:first-child { border-radius: 14px 0 0 14px; } .doc-table tr.tot-row td:last-child { border-radius: 0 14px 14px 0; color: var(--lime); }
 .panel { flex-shrink: 0; }
+.money-bar { align-items: flex-end; }
+.money-bar .field { flex: 0 1 240px; }
+.money-bar .btn { margin-left: auto; min-height: 52px; }

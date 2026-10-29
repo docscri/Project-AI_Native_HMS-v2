@@ -1006,38 +1006,24 @@ function moneyTiles(t) {
   return `<div class="tiles-row"><div class="tk big"><small>Net</small><b>${rupees(t.net)}</b></div><div class="tk"><small>Cash</small><b>${rupees(m.cash)}</b></div><div class="tk"><small>UPI</small><b>${rupees(m.upi)}</b></div><div class="tk"><small>Card</small><b>${rupees(m.card)}</b></div></div>
     <div class="tiles-row"><div class="tk"><small>Visits</small><b>${t.visits}</b></div><div class="tk"><small>Refunds</small><b>${rupees(t.refunded)}</b></div><div class="tk"><small>Discounts</small><b>${rupees(t.discounts)}</b></div><div class="tk"><small>Waived</small><b>${t.waived}</b></div></div>`;
 }
-const RANGES = [["today", "Today"], ["yesterday", "Yesterday"], ["week", "This week"], ["month", "This month"]];
-function rangeOf(k) {
-  const t = new Date(TODAY + "T00:00");
-  if (k === "yesterday") return [addDays(TODAY, -1), addDays(TODAY, -1)];
-  if (k === "week") return [addDays(TODAY, -((t.getDay() + 6) % 7)), TODAY];
-  if (k === "month") return [TODAY.slice(0, 8) + "01", TODAY];
-  return [TODAY, TODAY];
-}
 async function moneyView() {
-  S.mon = S.mon || { from: TODAY, to: TODAY, doc: "" };
-  const f = S.mon, t = await api(`/collections?start=${f.from}&end=${f.to}${f.doc ? "&doctor_id=" + f.doc : ""}`);
+  S.mon = S.mon || { from: TODAY, to: TODAY };
+  const f = S.mon, t = await api(`/collections?start=${f.from}&end=${f.to}`);
   S.monData = t;
-  const one = f.from === f.to, quick = RANGES.find(([k]) => { const [a, b] = rangeOf(k); return a === f.from && b === f.to; })?.[0];
-  const line = (v, amt, extra) => `<div class="r q coll-row"><span class="num muted">${v.receipt_no ? "#" + v.receipt_no : ""}</span><span class="who"><b>${esc(v.patient_name)}</b><small class="muted"> · ${esc(v.doctor_name)}</small></span><span class="muted">${extra}</span><b class="num">${amt}</b><button class="btn small" data-a="receipt" data-v="${v.id}">Receipt</button></div>`;
   const dash = n => n ? n : `<span class="muted">—</span>`;
   const tot = t.by_doctor.reduce((a, d) => ({ seen: a.seen + d.seen, walk_ins: a.walk_ins + d.walk_ins, no_shows: a.no_shows + d.no_shows, collected: a.collected + d.collected, refunded: a.refunded + d.refunded, net: a.net + d.net }), { seen: 0, walk_ins: 0, no_shows: 0, collected: 0, refunded: 0, net: 0 });
-  return `<div class="bar-row"><div class="seg">${RANGES.map(([k, l]) => `<button data-a="mr-quick" data-v="${k}" aria-pressed="${k === quick}">${l}</button>`).join("")}</div><span class="grow"></span><button class="btn" data-a="mr-print">Print</button></div>
-    <section class="panel"><div class="range-bar"><label class="field">From<input type="date" id="mr-from" max="${TODAY}" value="${f.from}"></label><label class="field">To<input type="date" id="mr-to" max="${TODAY}" value="${f.to}"></label>
-      <label class="field">Doctor<select id="mr-doc"><option value="">All doctors</option>${S.doctors.map(d => `<option value="${d.id}" ${String(d.id) === f.doc ? "selected" : ""}>${esc(d.name)}</option>`).join("")}</select></label><button class="btn primary" data-a="mr-go">Show</button></div>
-      ${moneyTiles(t)}</section>
+  return `<div class="bar-row money-bar"><label class="field">From<input type="date" id="mr-from" max="${TODAY}" value="${f.from}" data-a="mr-range"></label><label class="field">To<input type="date" id="mr-to" max="${TODAY}" value="${f.to}" data-a="mr-range"></label><button class="btn" data-a="mr-print">Print</button></div>
+    <section class="panel">${moneyTiles(t)}</section>
     <section class="panel scroll"><span class="label">By doctor</span><table class="t doc-table"><thead><tr><th>Doctor</th><th class="n">Patients seen</th><th class="n">Walk-ins</th><th class="n">No-shows</th><th class="n">Collected</th><th class="n">Refunds</th><th class="n">Net</th></tr></thead><tbody>
-      ${t.by_doctor.map(d => `<tr class="click" data-a="mr-doc" data-v="${d.id}"><td>${person({ name: d.name, role: d.speciality || "Doctor" })}</td><td class="n"><b>${d.seen}</b></td><td class="n">${dash(d.walk_ins)}</td><td class="n">${dash(d.no_shows)}</td><td class="n">${rupees(d.collected)}</td><td class="n">${d.refunded ? rupees(d.refunded) : dash(0)}</td><td class="n"><b>${rupees(d.net)}</b></td></tr>`).join("") || `<tr><td colspan="7" class="muted">—</td></tr>`}
+      ${t.by_doctor.map(d => `<tr><td>${person({ name: d.name, role: d.speciality || "Doctor" })}</td><td class="n"><b>${d.seen}</b></td><td class="n">${dash(d.walk_ins)}</td><td class="n">${dash(d.no_shows)}</td><td class="n">${rupees(d.collected)}</td><td class="n">${d.refunded ? rupees(d.refunded) : dash(0)}</td><td class="n"><b>${rupees(d.net)}</b></td></tr>`).join("") || `<tr><td colspan="7" class="muted">—</td></tr>`}
       ${t.by_doctor.length > 1 ? `<tr class="tot-row"><td><b>Total</b></td><td class="n"><b>${tot.seen}</b></td><td class="n">${tot.walk_ins}</td><td class="n">${tot.no_shows}</td><td class="n">${rupees(tot.collected)}</td><td class="n">${rupees(tot.refunded)}</td><td class="n"><b>${rupees(tot.net)}</b></td></tr>` : ""}</tbody></table></section>
-    ${one ? `<section class="panel"><span class="label">Payments</span><div class="rows">${t.payments.map(v => line(v, rupees(v.amount_paid), v.amount_paid ? (v.payment_method || "").toUpperCase() : "Waived")).join("")}
-        ${t.refunds.map(v => line(v, "−" + rupees(v.refund_amount), "Refund · " + esc(v.refund_reason || ""))).join("")}${t.payments.length || t.refunds.length ? "" : `<div class="empty">—</div>`}</div></section>`
-      : `<section class="panel scroll"><span class="label">Day by day</span><table class="t"><thead><tr><th>Date</th><th class="n">Visits</th><th class="n">Cash</th><th class="n">UPI</th><th class="n">Card</th><th class="n">Refunds</th><th class="n">Net</th></tr></thead><tbody>
-        ${t.days.map(d => `<tr><td><b>${niceDate(d.date)}</b></td><td class="n">${d.visits}</td><td class="n">${rupees(d.by_method.cash)}</td><td class="n">${rupees(d.by_method.upi)}</td><td class="n">${rupees(d.by_method.card)}</td><td class="n">${rupees(d.refunded)}</td><td class="n"><b>${rupees(d.net)}</b></td></tr>`).join("") || `<tr><td colspan="7" class="muted">—</td></tr>`}</tbody></table></section>`}`;
+    <section class="panel scroll"><span class="label">By date</span><table class="t doc-table"><thead><tr><th>Date</th><th class="n">Visits</th><th class="n">Cash</th><th class="n">UPI</th><th class="n">Card</th><th class="n">Refunds</th><th class="n">Net</th></tr></thead><tbody>
+      ${t.days.map(d => `<tr><td><b>${niceDate(d.date)}</b></td><td class="n">${d.visits}</td><td class="n">${rupees(d.by_method.cash)}</td><td class="n">${rupees(d.by_method.upi)}</td><td class="n">${rupees(d.by_method.card)}</td><td class="n">${d.refunded ? rupees(d.refunded) : dash(0)}</td><td class="n"><b>${rupees(d.net)}</b></td></tr>`).join("") || `<tr><td colspan="7" class="muted">—</td></tr>`}</tbody></table></section>`;
 }
 function printCollections() {
   const t = S.monData, f = S.mon, w = window.open("", "_blank"), m = t.by_method;
   const span = f.from === f.to ? niceDate(f.from) : `${niceDate(f.from)} – ${niceDate(f.to)}`;
-  const doc = f.doc ? S.doctors.find(d => String(d.id) === f.doc)?.name : "All doctors";
+  const doc = "All doctors";
   w.document.write(`<!doctype html><meta charset="utf-8"><title>Collections · ${span}</title><link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
     <style>@page{size:A4;margin:14mm}*{box-sizing:border-box}body{font-family:Manrope,sans-serif;color:#0B1411;margin:0;background:#E8F1EC;-webkit-print-color-adjust:exact;print-color-adjust:exact}
     .page{max-width:860px;margin:28px auto;background:#F6FAF7;border-radius:28px;padding:40px 44px}header{display:flex;justify-content:space-between;align-items:flex-start;background:#0B1411;color:#E8F1EC;border-radius:22px;padding:22px 26px}
@@ -1084,7 +1070,7 @@ document.addEventListener("click", e => {
   const t = e.target.closest("[data-a]"); if (!t) return;
   const a = t.dataset.a, v = t.dataset.v;
   if (a === "scrim") { if (e.target === t && M?.kind !== "sched") closeModal(); return; }
-  if (["lim", "lvm-m", "lvm-y", "rgm-m", "rgm-y", "free-text", "up-file", "mg-q", "vf-q", "vf-doc", "pay-disc", "bk-q", "pt-q", "cs-q", "bk-date", "bk-doc", "sc-doc", "sc-month-picker", "sc-year-picker", "cs-doc"].includes(a)) return;
+  if (["lim", "mr-range", "lvm-m", "lvm-y", "rgm-m", "rgm-y", "free-text", "up-file", "mg-q", "vf-q", "vf-doc", "pay-disc", "bk-q", "pt-q", "cs-q", "bk-date", "bk-doc", "sc-doc", "sc-month-picker", "sc-year-picker", "cs-doc"].includes(a)) return;
   e.preventDefault();
   const D = S.data;
   run(async () => {
@@ -1215,9 +1201,6 @@ document.addEventListener("click", e => {
         toast({ approve: "Approved", reject: "Rejected", cancel: "Leave cancelled" }[a.slice(3)] + (r.bookings_affected ? ` · ${r.bookings_affected} booking${r.bookings_affected > 1 ? "s" : ""} to move` : ""), r.bookings_affected > 0);
         M?.kind === "account" ? openAccount() : route(); break; }
       case "reg-print": printRegister(); break;
-      case "mr-go": Object.assign(S.mon, { from: $("#mr-from").value, to: $("#mr-to").value, doc: $("#mr-doc").value }); route(); break;
-      case "mr-quick": { const [a, b] = rangeOf(v); Object.assign(S.mon, { from: a, to: b }); route(); break; }
-      case "mr-doc": S.mon.doc = S.mon.doc === v ? "" : v; route(); break;
       case "mr-print": printCollections(); break;
       case "att-in": case "att-out": await api(`/attendance/check-${a === "att-in" ? "in" : "out"}`, { body: {} }); toast(a === "att-in" ? "Checked in" : "Checked out"); openAccount(); break;
       case "my-leave": openLeave({ self: true }); break;
@@ -1291,6 +1274,7 @@ document.addEventListener("input", e => {
 document.addEventListener("change", e => {
   const a = e.target.dataset?.a;
   if (a === "ops-date") { S.date = e.target.value || TODAY; route(); }
+  if (a === "mr-range") { const from = $("#mr-from").value || TODAY, to = $("#mr-to").value || from; Object.assign(S.mon, from <= to ? { from, to } : { from: to, to: from }); route(); }
   if (/^(lvm|rgm)-[my]$/.test(a)) { const [y, m] = S.adm.month.split("-").map(Number); const nm = a.endsWith("-m") ? Number(e.target.value) : m, ny = a.endsWith("-y") ? Number(e.target.value) : y; S.adm.month = `${ny}-${String(nm).padStart(2, "0")}`; route(); }
   if (a === "vf-doc") { S.vf.doc = e.target.value; const r = $("#ops-rows"); if (r && S.data?.visits) r.innerHTML = opsRows(S.data.visits); }
   if (a === "bk-date") { M.date = e.target.value || TODAY; run(loadAvail); }
