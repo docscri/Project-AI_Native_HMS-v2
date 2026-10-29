@@ -30,8 +30,8 @@ def test_full_flow():
         doc = c.get("/api/me", headers=h).json()["member"]["id"]
 
         # Patients
-        p1 = c.post("/api/patients", headers=mh, json={"name": "Ravi", "phone": "999"}).json()
-        p2 = c.post("/api/patients", headers=mh, json={"name": "Anil", "phone": "888"}).json()
+        p1 = c.post("/api/patients", headers=mh, json={"name": "Ravi", "phone": "9999999999"}).json()
+        p2 = c.post("/api/patients", headers=mh, json={"name": "Anil", "phone": "8888888888"}).json()
         assert p1["uhid"] == "AC-0001"
 
         # Booking with token at booking; the duplicate is refused; a chosen token works

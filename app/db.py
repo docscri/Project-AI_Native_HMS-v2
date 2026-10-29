@@ -206,6 +206,6 @@ def now() -> str:
 
 def log_event(db, clinic_id, actor_id, entity, entity_id, action, data=None) -> None:
     db.execute(
-        "insert into events (clinic_id, actor_id, entity, entity_id, action, data) values (?, ?, ?, ?, ?, ?)",
-        (clinic_id, actor_id, entity, entity_id, action, json.dumps(data) if data else None),
+        "insert into events (clinic_id, actor_id, entity, entity_id, action, data, at) values (?, ?, ?, ?, ?, ?, ?)",
+        (clinic_id, actor_id, entity, entity_id, action, json.dumps(data) if data else None, now()),
     )

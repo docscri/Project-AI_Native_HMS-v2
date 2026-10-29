@@ -219,6 +219,20 @@ def draft(visit_id: int, me=Depends(doctor_screen), db=Depends(get_db)):
     return load_note(db, visit_id)
 
 
+@router.post("/visits/{visit_id}/note")
+def blank_note(visit_id: int, me=Depends(doctor_screen), db=Depends(get_db)):
+    """An empty note the doctor writes by hand, next to the transcript."""
+    v = get_visit(db, me, visit_id)
+    if v["status"] != "with_doctor":
+        raise HTTPException(409, "Start the visit first.")
+    if not load_note(db, visit_id):
+        db.execute("insert into notes (clinic_id, patient_id, visit_id, doctor_id, content, citations) values (?, ?, ?, ?, ?, ?)",
+                   (me["clinic_id"], v["patient_id"], visit_id, v["doctor_id"],
+                    json.dumps({"soap": {"S": "", "O": "", "A": "", "P": ""}, "rx": []}), "{}"))
+        log_event(db, me["clinic_id"], me["id"], "note", visit_id, "started")
+    return load_note(db, visit_id)
+
+
 @router.put("/notes/{note_id}")
 def edit_note(note_id: int, body: NoteEdit, me=Depends(doctor_screen), db=Depends(get_db)):
     n = row(db.execute("select * from notes where id = ? and clinic_id = ?", (note_id, me["clinic_id"])).fetchone())

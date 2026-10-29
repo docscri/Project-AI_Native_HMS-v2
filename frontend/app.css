@@ -745,3 +745,15 @@ table.members tr.click:hover td:first-child b { text-decoration-color: var(--ink
 .more-list { display: flex; flex-direction: column; gap: 8px; }
 .more-list .btn { justify-content: center; }
 .seg button:disabled { opacity: .35; cursor: default; }
+.dict-split { display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.4fr); gap: 22px; align-items: start; }
+.hand-note .soap textarea { background: var(--tile); }
+.hand-note .soap textarea:focus { background: var(--surface); }
+.hand-note .foot { flex-wrap: wrap; justify-content: flex-end; }
+.hand-note .soap { grid-template-columns: 40px 1fr; gap: 12px; }
+.hand-note .soap > b { width: 40px; height: 40px; font-size: 19px; }
+.hand-note { display: flex; flex-direction: column; gap: 12px; background: var(--white); border-radius: 22px; padding: 16px; }
+.empty-note { align-items: center; justify-content: center; min-height: 200px; background: var(--tile); }
+@media (max-width: 1100px) { .dict-split { grid-template-columns: 1fr; } }
+.act-seg { align-self: flex-start; }
+.act-row { grid-template-columns: 110px minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, .6fr) !important; }
+@media (max-width: 900px) { .act-row { grid-template-columns: 90px minmax(0, 1fr) !important; } .act-row > :nth-child(n+3) { display: none; } }

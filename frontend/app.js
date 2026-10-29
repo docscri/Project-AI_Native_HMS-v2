@@ -656,6 +656,14 @@ function paneBrief(v) {
     ${rest.length ? `<div class="cx-events">${rest.map(i => `<div class="${i.flag ? "flag" : ""}"><span>${i.flag ? "⚠" : "•"}</span><span>${esc(i.text)}${citeBtns(i.cites)}</span></div>`).join("")}</div>` : ""}`;
 }
 function paneDictate(v) {
+  const n = v.note, signed = n?.status === "signed";
+  const write = v.status === "with_doctor" || n;
+  const side = !write ? "" : n ? `<div class="hand-note">${signed ? `<div class="result">✓ Signed</div>` : ""}${noteEditor(n, signed)}
+      ${signed ? "" : `<div class="foot"><button class="btn" data-a="note-save" data-v="${n.id}">Save draft</button><button class="btn primary" data-a="note-sign" data-v="${n.id}">Sign &amp; complete</button></div>`}</div>`
+    : `<div class="hand-note empty-note"><button class="btn" data-a="note-blank" data-v="${v.id}">Write note</button></div>`;
+  return `<div class="${write ? "dict-split" : ""}"><div>${transcriptText(v)}</div>${side}</div>`;
+}
+function transcriptText(v) {
   return `<div class="live-text">${v.transcript.map(s => `<span class="live-seg" id="ev-${s.id}">${esc(s.text)} </span>`).join("")}<span class="live-interim" id="live-interim">${esc(S.interim || "")}</span>${S.rec ? `<span class="live-cursor"></span>` : ""}</div>`;
 }
 const seg = s => `<span class="live-seg" id="ev-${s.id}">${esc(s.text)} </span>`;
@@ -750,13 +758,22 @@ async function viewPatients(id) {
 function profile(p) {
   const visits = p.visits.filter(v => ["done", "with_doctor", "waiting", "booked"].includes(v.status));
   return `<section class="panel" style="gap:14px"><div class="actions" style="justify-content:space-between;align-items:flex-start"><div><h2>${esc(p.name)}</h2>
-      <div class="muted">${ageOf(p.dob)} ${esc(p.sex || "")} · <span class="mono">${esc(p.uhid)}</span> · ${esc(p.phone)}</div></div><button class="btn small" data-a="pt-edit" data-v="${p.id}">Edit</button></div>
+      <div class="muted">${ageOf(p.dob)} ${esc(p.sex || "")} · <span class="mono">${esc(p.uhid)}</span> · ${esc(p.phone)}</div></div><span class="actions" style="gap:6px"><button class="btn small" data-a="pt-edit" data-v="${p.id}">Edit</button><button class="btn small" data-a="pt-merge" data-v="${p.id}">Merge</button></span></div>
     <span class="label">Visit history</span>
     ${visits.length ? `<div class="timeline">${visits.map(v => `<div class="tl"><div class="tl-head"><b>${longDate(v.date)}</b><span>${esc(v.doctor)}</span>${pill(v.status)}</div>
       <div class="items">${v.note ? `<button class="btn small" data-a="print" data-v="${v.note.id}">${v.note.status === "signed" ? "Note & prescription" : "Draft note"}</button>` : ""}
       ${v.documents.map(d => `<button class="btn small" data-a="open-doc" data-v="${d.id}">📄 ${esc(d.filename)}</button>`).join("")}</div>
       ${v.note?.soap?.A ? `<div class="muted" style="font-size:13.5px;margin-top:6px">${esc(v.note.soap.A)}</div>` : ""}</div>`).join("")}</div>` : `<div class="empty">—</div>`}
   </section>`;
+}
+function renderMerge() {
+  const m = M;
+  modal(`<h2>Merge into this patient</h2>
+    ${m.other ? `<div class="hit actions" style="justify-content:space-between;align-items:center"><span><b>${esc(m.other.name)}</b> · ${esc(m.other.phone || "—")}</span><span class="mono muted">${esc(m.other.uhid)}</span></div>`
+      : `<input class="input" id="mg-q" placeholder="Search name, phone or UHID" value="${esc(m.q)}" data-a="mg-q" autocomplete="off">
+         <div class="pick">${m.results.filter(x => x.id !== m.id).map(x => `<button data-a="mg-pick" data-v="${x.id}"><span><b>${esc(x.name)}</b> · ${esc(x.phone || "—")}</span><span class="mono muted">${esc(x.uhid)}</span></button>`).join("")}</div>`}
+    <div class="foot"><button class="btn" data-a="${m.other ? "mg-clear" : "close"}">Back</button><button class="btn danger" data-a="mg-go" ${m.other ? "" : "disabled"}>Merge</button></div>`);
+  const q = $("#mg-q"); if (q) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); }
 }
 function openPatientEdit(p) {
   M = { kind: "pedit", id: p.id };
@@ -768,7 +785,7 @@ function openPatientEdit(p) {
 /* ---------- administration ---------- */
 async function viewAdmin(tab) {
   const editable = S.me.is_admin;
-  const tabs = [["clinic", "Clinic details"], ["rules", "Clinic rules"], ["members", "Members"]];
+  const tabs = [["clinic", "Clinic details"], ["rules", "Clinic rules"], ["members", "Members"], ...(editable ? [["activity", "Activity"]] : [])];
   let body = "";
   if (tab === "clinic") body = `<section class="panel" style="max-width:640px"><label class="field">Clinic name<input id="ad-name" value="${esc(S.clinic.name)}"></label>
     <label class="field">Phone<input id="ad-phone" value="${esc(S.clinic.phone)}"></label><label class="field">Address<input id="ad-addr" value="${esc(S.clinic.address)}"></label>
@@ -787,16 +804,43 @@ async function viewAdmin(tab) {
     </tbody></table></section>${editable ? `<div class="actions"><button class="btn primary" data-a="member-add" data-v="doctor">Add doctor</button><button class="btn" data-a="member-add" data-v="staff">Add staff</button></div>` : ""}`;
     S.members = ms;
   }
+  if (tab === "activity" && editable) {
+    S.act = S.act || { kind: "", events: [], more: false };
+    const r = await api(`/activity?kind=${S.act.kind}`); S.act.events = r.events; S.act.more = r.more;
+    body = `<div class="seg act-seg">${ACT_KINDS.map(([k, l]) => `<button data-a="act-kind" data-v="${k}" aria-pressed="${k === S.act.kind}">${l}</button>`).join("")}</div>
+      <section class="panel"><div class="rows" id="act-rows">${actRows(S.act.events)}</div>${S.act.more ? `<div><button class="btn small" data-a="act-more">More</button></div>` : ""}</section>`;
+  }
   view(`<div class="head"><div><h1>Administration</h1></div></div>
     <div class="actions admin-tabs">${tabs.map(([k, l]) => `<button class="btn" data-a="ad-tab" data-v="${k}" aria-pressed="${k === tab}">${l}</button>`).join("")}</div>${body}`);
 }
+
+const ACT_KINDS = [["", "All"], ["visits", "Visits"], ["patients", "Patients"], ["notes", "Notes"], ["schedules", "Schedules"], ["team", "Team"]];
+const ACT = { booked: "Booked", walk_in: "Walk-in", waiting: "Arrived", with_doctor: "Consultation started", done: "Visit completed", no_show: "No-show", cancelled: "Cancelled",
+  booked_again: "Arrival undone", rescheduled: "Rescheduled", refunded: "Refunded", queue_moved: "Moved in queue", late_on: "Marked late", late_off: "Late cleared",
+  registered: "Registered", edited: "Details edited", merged: "Records merged", drafted: "Note drafted", started: "Note started", signed: "Note signed", uploaded: "Document added",
+  day_changed: "Day changed", leave: "Leave", leave_cleared: "Leave cleared", invited: "Invited", joined: "Joined", logged_in: "Logged in", password_changed: "Password changed",
+  password_reset: "Password reset", reset_link_created: "Reset link made", updated: "Details edited", deactivated: "Set inactive", created: "Clinic created",
+  details_updated: "Clinic details saved", rules_updated: "Clinic rules saved" };
+function actDetail(e) {
+  const d = e.data || {};
+  if (e.action === "refunded") return `${rupees(d.amount)} · ${esc(d.reason || "")}`;
+  if (e.action === "cancelled" && d.cancel_reason) return esc(d.cancel_reason);
+  if (e.action === "rescheduled") return `${niceDate(d.from)} → ${niceDate(d.to)}${d.reason ? " · " + esc(d.reason) : ""}`;
+  if (e.action === "waiting" && d.amount_paid != null) return `${rupees(d.amount_paid)}${d.payment_method ? " · " + d.payment_method.toUpperCase() : ""}${d.discount ? ` · −${rupees(d.discount)} ${esc(d.discount_reason || "")}` : ""}`;
+  if (e.action === "leave" || e.action === "leave_cleared") return `${niceDate(d.from)} – ${niceDate(d.to)}${d.all_doctors ? " · Clinic holiday" : ""}`;
+  if (e.action === "day_changed") return d.date ? niceDate(d.date) + (d.is_off ? " · Off" : "") : "";
+  if (e.action === "merged") return `${esc(d.name || "")} ${esc(d.removed || "")}`;
+  return "";
+}
+const actRows = evs => evs.map(e => `<div class="r act-row"><span class="num muted">${esc((e.at || "").slice(5, 16).replace("T", " "))}</span>
+  <span class="who"><b>${e.action === "booked" && e.data?.refund_reason ? "Arrival undone" : ACT[e.action] || esc(e.action)}</b>${e.subject ? " · " + esc(e.subject) : ""}</span><span class="muted">${actDetail(e)}</span><span class="muted">${esc(e.actor || "—")}</span></div>`).join("") || `<div class="empty">—</div>`;
 
 /* ---------- events ---------- */
 document.addEventListener("click", e => {
   const t = e.target.closest("[data-a]"); if (!t) return;
   const a = t.dataset.a, v = t.dataset.v;
   if (a === "scrim") { if (e.target === t && M?.kind !== "sched") closeModal(); return; }
-  if (["lim", "vf-q", "vf-doc", "pay-disc", "bk-q", "pt-q", "cs-q", "bk-date", "bk-doc", "sc-doc", "sc-month-picker", "sc-year-picker", "cs-doc"].includes(a)) return;
+  if (["lim", "mg-q", "vf-q", "vf-doc", "pay-disc", "bk-q", "pt-q", "cs-q", "bk-date", "bk-doc", "sc-doc", "sc-month-picker", "sc-year-picker", "cs-doc"].includes(a)) return;
   e.preventDefault();
   const D = S.data;
   run(async () => {
@@ -826,10 +870,28 @@ document.addEventListener("click", e => {
       case "bk-pay": M.pay = v; renderBooking(); break;
       case "bk-confirm": await confirmBooking(); break;
       case "register": openRegister(v); break;
+      case "rg-use": { const p = M.same.find(x => x.id === Number(v));
+        if (M.back) { const back = M.back; M = back; M.patient = p; renderBooking(); } else { closeModal(); location.hash.startsWith("#/consult") ? go(`#/consult?doctor=${S.data.doctorId}&patient=${p.id}`) : go(`#/patients/${p.id}`); }
+        break; }
+      case "rg-again": { const f = M.form, back = M.back; openRegister(f.name); M.back = back; $("#rg-phone").value = f.phone; $("#rg-dob").value = f.dob || ""; $("#rg-sex").value = f.sex; break; }
+      case "pt-merge": M = { kind: "merge", id: Number(v), q: "", results: [] }; renderMerge(); break;
+      case "mg-clear": M.other = null; renderMerge(); break;
+      case "mg-pick": M.other = M.results.find(x => x.id === Number(v)); renderMerge(); break;
+      case "mg-go": { const p = await api(`/patients/${M.id}/merge`, { body: { other_id: M.other.id } }); closeModal(); toast(`Merged into ${p.uhid}`); go(`#/patients/${p.id}`); route(); break; }
       case "rg-back": { const back = M.back; M = back; renderBooking(); break; }
-      case "rg-save": {
-        const p = await api("/patients", { body: { name: $("#rg-name").value, phone: $("#rg-phone").value, dob: $("#rg-dob").value || null, sex: $("#rg-sex").value } });
-        toast(p.similar?.length ? `Registered ${p.uhid}. Note: similar patient ${p.similar[0].name} (${p.similar[0].uhid}) exists.` : `Registered ${p.uhid}`);
+      case "rg-save": case "rg-new": {
+        const f = a === "rg-new" ? M.form : { name: $("#rg-name").value, phone: $("#rg-phone").value, dob: $("#rg-dob").value || null, sex: $("#rg-sex").value };
+        if (a === "rg-save") {
+          const same = await api(`/patients/check?name=${encodeURIComponent(f.name)}&phone=${encodeURIComponent(f.phone)}&dob=${f.dob || ""}`);
+          if (same.length) {
+            M.form = f; M.same = same;
+            modal(`<h2>Same person?</h2><div class="pick">${same.map(x => `<button data-a="rg-use" data-v="${x.id}"><span><b>${esc(x.name)}</b> · ${esc(x.phone || "—")}${x.dob ? " · " + ageOf(x.dob) : ""} ${esc(x.sex || "")}</span><span class="mono muted">${esc(x.uhid)}</span></button>`).join("")}</div>
+              <div class="foot"><button class="btn" data-a="rg-again">Back</button><button class="btn primary" data-a="rg-new">New patient</button></div>`);
+            break;
+          }
+        }
+        const p = await api("/patients", { body: f });
+        toast(`Registered ${p.uhid}`);
         if (M.back) { const back = M.back; M = back; M.patient = p; renderBooking(); } else { closeModal(); location.hash.startsWith("#/consult") ? go(`#/consult?doctor=${S.data.doctorId}&patient=${p.id}`) : go(`#/patients/${p.id}`); }
         break; }
       case "arrive": openArrive([...D.columns.booked].find(x => x.id === Number(v))); break;
@@ -911,6 +973,10 @@ document.addEventListener("click", e => {
       case "dict-add": { const i = $("#dict-in"); await addLine(Number(v), i.value); break; }
       case "rx-add": { const n = D.cur.note; n.content = readNote(); n.content.rx.push({ medicine: "", dose: "", duration: "", instructions: "" }); rerenderNote(); break; }
       case "rx-del": { const n = D.cur.note; n.content = readNote(); n.content.rx.splice(Number(v), 1); rerenderNote(); break; }
+      case "act-kind": S.act.kind = v; route(); break;
+      case "act-more": { const r = await api(`/activity?kind=${S.act.kind}&before=${S.act.events[S.act.events.length - 1].id}`); S.act.events.push(...r.events); S.act.more = r.more;
+        $("#act-rows").innerHTML = actRows(S.act.events); if (!r.more) t.remove(); break; }
+      case "note-blank": await api(`/visits/${v}/note`, { body: {} }); refreshConsult(); break;
       case "note-save": await api(`/notes/${v}`, { method: "PUT", body: readNote() }); toast("Draft saved"); refreshConsult(); break;
       case "note-sign": await api(`/notes/${v}`, { method: "PUT", body: readNote() }); await api(`/notes/${v}/sign`, { body: {} }); toast("Signed. Visit complete."); refreshConsult(); break;
       case "print": window.open(`/api/notes/${v}/print?token=${encodeURIComponent(S.token)}`, "_blank"); break;
@@ -931,6 +997,7 @@ document.addEventListener("input", e => {
   const a = e.target.dataset?.a;
   if (a === "bk-q") searchPatients(e.target.value);
   if (a === "pay-disc") payShow();
+  if (a === "mg-q") { M.q = e.target.value; clearTimeout(searchT); searchT = setTimeout(() => run(async () => { if (M?.kind !== "merge") return; M.results = M.q.trim() ? await api(`/patients?q=${encodeURIComponent(M.q)}`) : []; renderMerge(); }), 180); }
   if (a === "vf-q") { S.vf.q = e.target.value; const r = $("#ops-rows"); if (r && S.data?.visits) r.innerHTML = opsRows(S.data.visits); }
   if (a === "cs-q") { S.cq = e.target.value; clearTimeout(S.cqt); S.cqt = setTimeout(async () => { await run(S.reloadConsult); const q = $("#cs-q"); if (q) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); } }, 220); }
   if (a === "pt-q") { S.pq = e.target.value; clearTimeout(S.pqt); S.pqt = setTimeout(async () => { await viewPatients(Number(location.hash.split("/")[2]) || null); const q = $("#pt-q"); q.focus(); q.setSelectionRange(q.value.length, q.value.length); }, 200); }

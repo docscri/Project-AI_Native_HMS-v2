@@ -1,11 +1,13 @@
 """Register, search, profile and visit timeline."""
 import json
+from datetime import date
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from ..auth import current_member, require_screen
 from ..db import get_db, log_event, row, rows
+from .clinic import clean_phone
 
 router = APIRouter(prefix="/api/patients")
 
@@ -24,6 +26,40 @@ class PatientEdit(BaseModel):
     phone: str | None = None
 
 
+def clean(body) -> dict:
+    """Check name, phone, date of birth (age 0–120) and sex. Returns only the fields that were sent."""
+    out = body.model_dump(exclude_none=True)
+    if "name" in out:
+        out["name"] = " ".join(out["name"].split())
+        if not 1 <= len(out["name"]) <= 80:
+            raise HTTPException(422, "Enter the patient's full name.")
+    if "phone" in out:
+        out["phone"] = clean_phone(out["phone"])
+    if out.get("dob"):
+        try:
+            dob = date.fromisoformat(out["dob"])
+        except ValueError:
+            raise HTTPException(422, "Enter a valid date of birth.")
+        if dob > date.today():
+            raise HTTPException(422, "Date of birth can't be in the future.")
+        if (date.today() - dob).days > 120 * 366:
+            raise HTTPException(422, "Check the date of birth: age is over 120.")
+    elif "dob" in out:
+        out["dob"] = None
+    if out.get("sex") and out["sex"] not in ("M", "F", "O"):
+        raise HTTPException(422, "Pick male, female or other.")
+    return out
+
+
+def similar(db, clinic_id: int, name: str, phone: str, dob: str | None, exclude: int | None = None) -> list[dict]:
+    """Patients who may be the same person: same phone, or same name (and same date of birth when both are known)."""
+    found = rows(db.execute(
+        """select id, uhid, name, phone, dob, sex from patients where clinic_id = ? and id is not ?
+           and ((phone = ? and phone != '') or lower(name) = lower(?)) order by id""",
+        (clinic_id, exclude, phone, name)))
+    return [p for p in found if p["phone"] == phone and phone or not (dob and p["dob"] and p["dob"] != dob)]
+
+
 def get_patient(db, me, patient_id: int) -> dict:
     p = row(db.execute("select * from patients where id = ? and clinic_id = ?", (patient_id, me["clinic_id"])).fetchone())
     if not p:
@@ -31,19 +67,23 @@ def get_patient(db, me, patient_id: int) -> dict:
     return p
 
 
+@router.get("/check")
+def check(name: str = "", phone: str = "", dob: str | None = None, me=Depends(current_member), db=Depends(get_db)):
+    """Before registering: anyone who may already be this patient."""
+    return similar(db, me["clinic_id"], " ".join(name.split()), clean_phone(phone), dob or None)
+
+
 @router.post("")
 def register(body: PatientIn, me=Depends(current_member), db=Depends(get_db)):
+    data = clean(body)
     db.lock(f"uhid:{me['clinic_id']}")
     c = row(db.execute("select uhid_prefix, next_uhid from clinics where id = ?", (me["clinic_id"],)).fetchone())
     uhid = f'{c["uhid_prefix"]}-{c["next_uhid"]:04d}'
     db.execute("update clinics set next_uhid = next_uhid + 1 where id = ?", (me["clinic_id"],))
     pid = db.execute("insert into patients (clinic_id, uhid, name, dob, sex, phone) values (?, ?, ?, ?, ?, ?)",
-                     (me["clinic_id"], uhid, body.name.strip(), body.dob, body.sex, body.phone.strip())).lastrowid
+                     (me["clinic_id"], uhid, data["name"], data.get("dob"), data.get("sex"), data.get("phone", ""))).lastrowid
     log_event(db, me["clinic_id"], me["id"], "patient", pid, "registered")
-    similar = rows(db.execute(
-        "select id, uhid, name, phone from patients where clinic_id = ? and id != ? and (phone = ? and phone != '' or lower(name) = lower(?))",
-        (me["clinic_id"], pid, body.phone.strip(), body.name.strip())))
-    return get_patient(db, me, pid) | {"similar": similar}
+    return get_patient(db, me, pid) | {"similar": similar(db, me["clinic_id"], data["name"], data.get("phone", ""), data.get("dob"), pid)}
 
 
 @router.get("")
@@ -78,8 +118,35 @@ def profile(patient_id: int, me=Depends(require_screen("patients")), db=Depends(
 @router.patch("/{patient_id}")
 def edit(patient_id: int, body: PatientEdit, me=Depends(current_member), db=Depends(get_db)):
     get_patient(db, me, patient_id)
-    changes = body.model_dump(exclude_none=True)
+    changes = clean(body)
     if changes:
         db.execute(f"update patients set {', '.join(f'{k} = ?' for k in changes)} where id = ?", (*changes.values(), patient_id))
         log_event(db, me["clinic_id"], me["id"], "patient", patient_id, "edited", changes)
     return get_patient(db, me, patient_id)
+
+
+class Merge(BaseModel):
+    other_id: int
+
+
+@router.post("/{patient_id}/merge")
+def merge(patient_id: int, body: Merge, me=Depends(require_screen("patients")), db=Depends(get_db)):
+    """Same person registered twice: move the other record's visits, notes and documents here, then remove it."""
+    keep = get_patient(db, me, patient_id)
+    other = get_patient(db, me, body.other_id)
+    if keep["id"] == other["id"]:
+        raise HTTPException(422, "Pick a different patient.")
+    clash = db.execute(
+        """select 1 from visits a join visits b on a.doctor_id = b.doctor_id and a.date = b.date
+           where a.patient_id = ? and b.patient_id = ? and a.status not in ('cancelled', 'no_show') and b.status not in ('cancelled', 'no_show')""",
+        (keep["id"], other["id"])).fetchone()
+    if clash:
+        raise HTTPException(409, "Both records have a visit with the same doctor on the same day. Cancel one first.")
+    for table in ("visits", "notes", "documents"):
+        db.execute(f"update {table} set patient_id = ? where patient_id = ?", (keep["id"], other["id"]))
+    fill = {k: other[k] for k in ("dob", "sex", "phone") if not keep[k] and other[k]}
+    if fill:
+        db.execute(f"update patients set {', '.join(f'{k} = ?' for k in fill)} where id = ?", (*fill.values(), keep["id"]))
+    db.execute("delete from patients where id = ?", (other["id"],))
+    log_event(db, me["clinic_id"], me["id"], "patient", keep["id"], "merged", {"removed": other["uhid"], "name": other["name"]})
+    return get_patient(db, me, keep["id"])
