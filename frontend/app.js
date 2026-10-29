@@ -745,7 +745,7 @@ function noteDock(v) {
 }
 function rightCol() {
   const D = S.data, p = D.profile;
-  const tabs = `<div class="cx-right-top"><button class="cx-side-btn close" data-a="cs-collapse" aria-label="Hide side panel" title="Hide side panel">×</button><div class="cx-seg"><button data-a="cs-side" data-v="profile" aria-pressed="${S.cside !== "citations"}">Profile</button><button data-a="cs-side" data-v="citations" aria-pressed="${S.cside === "citations"}">Citations</button></div></div>`;
+  const tabs = `<div class="cx-right-top"><button class="cx-side-btn close" data-a="cs-collapse" aria-label="Hide side panel" title="Hide side panel"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h12M12 6l6 6-6 6"/></svg></button><div class="cx-seg"><button data-a="cs-side" data-v="profile" aria-pressed="${S.cside !== "citations"}">Profile</button><button data-a="cs-side" data-v="citations" aria-pressed="${S.cside === "citations"}">Citations</button></div></div>`;
   if (S.cside === "citations") return `${tabs}${citations(D.cur)}`;
   if (!p) return `${tabs}<div class="cx-empty">—</div>`;
   return `${tabs}<div class="cx-rows">

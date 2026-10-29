@@ -872,3 +872,6 @@ table.members tr.click:hover td:first-child b { text-decoration-color: var(--ink
 .cx-right-top { display: flex; align-items: center; gap: 14px; }
 .cx-right-top .cx-seg { flex: 1; }
 .cx-side-btn.close { padding: 0; align-items: center; justify-content: center; color: var(--surface); font-size: 20px; line-height: 1; font-weight: 400; border-color: #ffffff2a; }
+.cx-side-btn.close { background: transparent; border: 1.5px solid #ffffff30; color: #ffffffc0; transition: border-color .2s, color .2s, transform .2s; }
+.cx-side-btn.close:hover { border-color: var(--lime); color: var(--lime); transform: translateX(2px); }
+.cx-head .cx-top-right:has(.cx-side-btn) { margin-right: -18px; }
