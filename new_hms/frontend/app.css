@@ -672,3 +672,7 @@ table.members tr.click:hover td:first-child b { text-decoration-color: var(--ink
 }
 .login-card:not(:has(.login-title)) { transform: none; }
 @media (max-width: 640px) { .days { flex-wrap: wrap; } }
+
+/* search results and the chosen patient sit on the theme tile, not white */
+.pick button, .hit { background: var(--tile); }
+.pick button:hover { background: var(--tile-2); }
