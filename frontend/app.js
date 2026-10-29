@@ -78,7 +78,7 @@ const go = h => { if (location.hash === h) route(); else location.hash = h; };
 function setToken(t) { S.token = t; try { t ? localStorage.setItem("clinic.token", t) : localStorage.removeItem("clinic.token"); } catch {} }
 function endLocal() { setToken(null); S.me = null; stopTimers(); closeModal(); go("#/login"); }
 async function logout() { if (S.token) await fetch("/api/auth/logout", { method: "POST", headers: { Authorization: "Bearer " + S.token } }).catch(() => {}); endLocal(); }
-function stopTimers() { clearInterval(S.timer); S.timer = null; clearTimeout(S.docT); if (S.rec) { try { S.rec.stop(); } catch {} S.rec = null; } }
+function stopTimers() { clearInterval(S.timer); S.timer = null; clearTimeout(S.docT); if (S.rec) { const r = S.rec; S.rec = null; try { r.stop(); } catch {} } S.recState = null; clearInterval(S.recT); }
 
 /* ---------- routing ---------- */
 const SCREENS = [["operations", "#/ops", "Operations", icon.ops], ["patients", "#/patients", "Patients", icon.patients],
@@ -593,7 +593,8 @@ function renderConsult() {
   const D = S.data, m = S.me, v = D.cur;
   const fe = $("#free-text"); if (fe && S.ft?.id === Number(fe.dataset.v)) { S.ft.sel = document.activeElement === fe ? fe.selectionEnd : null; S.ft.scroll = fe.scrollTop; }
   if (S.ft && S.ft.id !== v?.id) { saveText(S.ft.id); S.ft = null; }
-  const floatMic = v && ["waiting", "with_doctor"].includes(v.status) && S.ctab !== "note";
+  if (S.noteVisit !== v?.id) { S.noteVisit = v?.id; S.noteEdit = false; }
+  const floatMic = v && (["waiting", "with_doctor"].includes(v.status) || S.recState) && S.ctab !== "note";
   $("#root").innerHTML = `<div class="cx">
     <header class="cx-top">
       <b class="cx-logo">Dictate</b>
@@ -606,7 +607,7 @@ function renderConsult() {
     </header>
     <div class="cx-body ${S.rightCollapsed ? "wide" : ""}"><button class="cx-collapse" data-a="cs-collapse" aria-label="${S.rightCollapsed ? "Show side panel" : "Hide side panel"}" title="${S.rightCollapsed ? "Show side panel" : "Hide side panel"}"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${S.rightCollapsed ? "M15 6l-6 6 6 6" : "M9 6l6 6-6 6"}"/></svg></button>
       <aside class="cx-left">${leftCol()}</aside>
-      <main class="cx-center" id="cx-center">${center()}${floatMic ? `<div class="cx-float">${micBtn(v)}</div>` : ""}</main>
+      <main class="cx-center" id="cx-center">${center()}${floatMic ? `<div class="cx-float">${dock(v)}</div>` : v && S.ctab === "note" ? `<div class="cx-float">${noteDock(v)}</div>` : ""}</main>
       ${S.rightCollapsed ? "" : `<aside class="cx-right">${rightCol()}</aside>`}
     </div>
   </div>`;
@@ -619,8 +620,27 @@ function restoreFree() {
   if (S.ft.sel != null) { el.focus({ preventScroll: true }); el.setSelectionRange(S.ft.sel, S.ft.sel); }
   if (S.ft.scroll) el.scrollTop = S.ft.scroll;
 }
+const ICON = {
+  pause: '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><rect x="6.5" y="5" width="3.6" height="14" rx="1.4"/><rect x="13.9" y="5" width="3.6" height="14" rx="1.4"/></svg>',
+  play: '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor"><path d="M8 5.6v12.8a1 1 0 0 0 1.5.86l10.2-6.4a1 1 0 0 0 0-1.72L9.5 4.74A1 1 0 0 0 8 5.6z"/></svg>',
+  stop: '<svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2.5"/></svg>',
+};
+const WAVE = [4, 9, 14, 7, 11, 5, 3, 16, 10, 6, 12, 8, 5, 13, 18, 7, 11, 6, 9, 4];
+function dock(v) {
+  if (S.recState && S.recVisit === v.id) {
+    const paused = S.recState === "paused";
+    return `<div class="dock rec ${paused ? "paused" : ""}"><div class="dock-wave">${WAVE.map((h, i) => `<i style="--h:${h}px;animation-delay:${(i * 97) % 900}ms"></i>`).join("")}</div>
+      <span class="dock-time" id="dock-timer">${fmtClock(recElapsed())}</span>
+      <button class="dock-round" data-a="${paused ? "mic-resume" : "mic-pause"}" aria-label="${paused ? "Resume" : "Pause"}" title="${paused ? "Resume" : "Pause"}">${paused ? ICON.play : ICON.pause}</button>
+      <button class="dock-stop" data-a="mic-stop" aria-label="Stop" title="Stop">${ICON.stop}</button></div>`;
+  }
+  const n = v.note, canDraft = v.status === "with_doctor" && n?.status !== "signed" && (freeText(v).trim() || v.documents.some(d => d.ai_status === "ready"));
+  if (S.ctab === "dictate" && S.dictDone === v.id && canDraft)
+    return `<div class="dock"><span class="dock-msg">Transcript finalized.</span><span class="grow"></span><button class="dock-ghost" data-a="cs-mic" data-v="${v.id}">Dictate more</button><button class="dock-go" data-a="cs-draft" data-v="${v.id}">Generate SOAP note</button></div>`;
+  return micBtn(v);
+}
 function micBtn(v, small) {
-  return `<button class="mic-dot ${small ? "sm" : ""} ${S.rec ? "on" : ""}" data-a="cs-mic" data-v="${v.id}" aria-label="${S.rec ? "Stop dictation" : "Dictate"}">${icon.mic}</button>${S.rec ? `<span class="mic-time" id="dock-timer">${S.recStart ? fmtClock(Date.now() - S.recStart) : "0:00"}</span>` : ""}`;
+  return `<button class="mic-dot ${small ? "sm" : ""}" data-a="cs-mic" data-v="${v.id}" aria-label="Dictate">${icon.mic}</button>`;
 }
 function leftCol() {
   const D = S.data, q = S.cq.trim().toLowerCase();
@@ -668,17 +688,59 @@ function paneDictate(v) {
   return `<textarea class="live-text live-edit" id="free-text" data-a="free-text" data-v="${v.id}" spellcheck="true" aria-label="Transcript" ${can ? "" : "readonly"}>${esc(freeText(v))}</textarea>`;
 }
 const freeText = v => S.ft?.id === v.id ? S.ft.text : (v.text || "");
+const SOAP = [["S", "Subjective"], ["O", "Objective"], ["A", "Assessment"], ["P", "Plan"]];
 function paneNote(v) {
   const n = v.note, signed = n?.status === "signed";
-  const canDraft = v.status === "with_doctor" && (freeText(v).trim() || v.documents.some(d => d.ai_status === "ready"));
-  const live = ["waiting", "with_doctor"].includes(v.status);
-  return `<div class="cx-sec"><span class="label">Clinical note</span><span class="actions" style="gap:8px;align-items:center">
-      ${!signed && canDraft ? `<button class="cx-pill-btn" data-a="cs-draft" data-v="${v.id}">${n ? "Re-draft" : "✦ Draft with AI"}</button>` : ""}
-      ${signed ? `<button class="cx-pill-btn" data-a="print" data-v="${n.id}">Print</button>` : ""}
-      ${live ? micBtn(v, true) : ""}</span></div>
-    ${signed ? `<div class="result">✓ Signed and saved · ${esc((n.signed_at || "").replace("T", " ").slice(0, 16))}</div>` : ""}
-    ${n ? noteEditor(n, signed) : `<p class="muted">—</p>`}
-    ${n && !signed ? `<div class="foot"><button class="btn" data-a="note-save" data-v="${n.id}">Save draft</button><button class="btn primary" data-a="note-sign" data-v="${n.id}">Sign &amp; complete</button></div>` : ""}`;
+  if (S.drafting === v.id) return `<div class="note-gen"><span class="label">Note · Writing</span><i></i><i></i><i></i></div>`;
+  if (!n) return `<div class="cx-empty">—</div>`;
+  if (S.noteEdit && !signed) return noteEditor(n, false);
+  let num = 0;
+  const sec = (k, label, body) => `<div class="soap-sec"><b class="soap-tile">${k}</b><div><span class="soap-label">${label}</span><div class="soap-body">${body}</div></div></div>`;
+  const out = SOAP.map(([k, label]) => {
+    const text = (n.content.soap[k] || "").trim();
+    const sents = text ? text.match(/[^.!?]+[.!?]*/g).map(x => x.trim()).filter(Boolean) : [];
+    const srcs = (n.citations?.[k] || []).map(id => ({ id, text: sourceOf(v, id)?.text || "" }));
+    return sec(k, label, sents.map(t => `<span class="nb">${++num}</span>${marked(t, srcs)}`).join(" ") || `<span class="muted">—</span>`);
+  }).join("");
+  const rx = n.content.rx.filter(r => r.medicine);
+  return `<div class="soap-read">${out}${rx.length ? sec("Rx", "Prescription", rx.map(r => `<div class="rx-line"><span class="nb">${++num}</span><b>${esc(r.medicine)}</b>${[r.dose, r.duration, r.instructions].filter(Boolean).map(x => ` · ${esc(x)}`).join("")}</div>`).join("")) : ""}</div>`;
+}
+// Underline the words of a sentence that come straight from its sources; clicking one opens that source.
+const STOP = new Set("a an the and or of to in on at for with by is are was were be been has have had this that it its as from no not patient patients reports reported says said complains denies looks like seems tab tablet order rule out once twice daily mg ml for since".split(" "));
+function marked(sentence, srcs) {
+  const words = sentence.split(/(\s+)/), norm = w => w.toLowerCase().replace(/[^a-z0-9/]/g, "");
+  const toks = words.map((w, i) => ({ w, i, n: /\s/.test(w) ? null : norm(w) })).filter(t => t.n !== null);
+  // Candidate phrases: up to 3 words found together in a source, trimmed of filler words; keep the 2 most telling.
+  const cands = [];
+  for (const src of srcs) {
+    const hay = " " + src.text.toLowerCase().split(/\s+/).map(norm).filter(Boolean).join(" ") + " ";
+    for (let i = 0; i < toks.length; i++) for (let j = i; j < Math.min(i + 3, toks.length); j++) {
+      if (!hay.includes(" " + toks.slice(i, j + 1).map(t => t.n).join(" ") + " ")) break;
+      if (STOP.has(toks[i].n) || STOP.has(toks[j].n) || i === 0 && j === toks.length - 1) continue;
+      const score = toks.slice(i, j + 1).reduce((n, t) => n + (STOP.has(t.n) ? 0 : t.n.length), 0) + (j - i) * 3;
+      if (score >= 8) cands.push({ a: i, b: j, id: src.id, score });
+    }
+  }
+  const marks = [];
+  for (const c of cands.sort((x, y) => y.score - x.score)) {
+    if (marks.length === 2) break;
+    if (!marks.some(m => !(c.b < m.a - 1 || c.a > m.b + 1))) marks.push(c);
+  }
+  if (!marks.length) return esc(sentence);
+  const byTok = new Map(); marks.forEach(m => { byTok.set(toks[m.a].i, { start: true, id: m.id }); byTok.set(toks[m.b].i, { ...(byTok.get(toks[m.b].i) || {}), end: true, id: m.id }); });
+  return words.map((w, i) => { const m = byTok.get(i); return (m?.start ? `<button class="cited" data-a="cite" data-v="${m.id}">` : "") + esc(w) + (m?.end ? "</button>" : ""); }).join("");
+}
+function noteDock(v) {
+  const n = v.note, signed = n?.status === "signed";
+  if (S.drafting === v.id) return `<div class="dock"><span class="dock-text">Writing your note…</span></div>`;
+  if (!n) {
+    const canDraft = v.status === "with_doctor" && (freeText(v).trim() || v.documents.some(d => d.ai_status === "ready"));
+    return canDraft ? `<div class="dock"><span class="grow"></span><button class="dock-go" data-a="cs-draft" data-v="${v.id}">Generate SOAP note</button></div>` : "";
+  }
+  if (signed) return `<div class="dock"><span class="dock-msg ok">Signed · ${esc((n.signed_at || "").replace("T", " ").slice(0, 16))}</span><span class="grow"></span><button class="dock-ghost" data-a="print" data-v="${n.id}">Print</button></div>`;
+  if (S.noteEdit) return `<div class="dock"><span class="dock-msg">Editing.</span><span class="grow"></span><button class="dock-go" data-a="note-done">Save</button></div>`;
+  return `<div class="dock"><span class="dock-msg">${Object.values(n.citations || {}).some(x => x.length) ? "Drafted by AI." : "Draft."}</span><span class="grow"></span>
+    <button class="dock-ghost" data-a="note-edit">Edit</button>${v.status === "with_doctor" ? `<button class="dock-ghost" data-a="cs-draft" data-v="${v.id}">Revalidate</button>` : ""}<button class="dock-go" data-a="note-sign-ro" data-v="${n.id}">Sign note</button></div>`;
 }
 function rightCol() {
   const D = S.data, p = D.profile;
@@ -722,6 +784,14 @@ function readNote() {
 function startMic(visitId) {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   if (!SR) { refreshConsult(); return toast("Use Chrome to dictate", true); }
+  Object.assign(S, { recState: "on", recVisit: visitId, recAcc: 0, recStart: Date.now(), dict: null, dictDone: null });
+  listen(visitId);
+  clearInterval(S.recT); S.recT = setInterval(() => { const t = $("#dock-timer"); if (t) t.textContent = fmtClock(recElapsed()); }, 500);
+  renderConsult();
+}
+const recElapsed = () => (S.recAcc || 0) + (S.recState === "on" && S.recStart ? Date.now() - S.recStart : 0);
+function listen(visitId) {
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   const r = new SR(); r.lang = "en-IN"; r.continuous = true; r.interimResults = true;
   S.dict = null;
   r.onresult = e => {
@@ -733,12 +803,29 @@ function startMic(visitId) {
       if (e.results[i].isFinal) { if (said) putSpeech(el, said + " ", true); } else interim += (interim ? " " : "") + said;
     }
     if (interim) putSpeech(el, interim, false);
-    S.ft = { id: visitId, text: el.value };
+    S.ft = { ...(S.ft?.id === visitId ? S.ft : {}), id: visitId, text: el.value };
     scheduleSave(visitId);
   };
-  r.onend = () => { if (S.rec === r) { S.rec = null; S.recStart = null; clearInterval(S.recT); S.dict = null; saveText(visitId).then(refreshConsult); } };
-  r.onerror = e => e.error !== "no-speech" && toast("Mic: " + e.error, true);
-  S.rec = r; S.recStart = Date.now(); clearInterval(S.recT); S.recT = setInterval(() => { const t = $("#dock-timer"); if (t && S.recStart) t.textContent = fmtClock(Date.now() - S.recStart); }, 500); r.start(); refreshConsult();
+  // Chrome ends recognition after a silence; keep listening until the doctor pauses or stops.
+  r.onend = () => { if (S.rec === r && S.recState === "on") { try { r.start(); } catch { listen(visitId); } } };
+  r.onerror = e => !["no-speech", "aborted"].includes(e.error) && toast("Mic: " + e.error, true);
+  S.rec = r; r.start();
+}
+function pauseMic() {
+  if (S.recState !== "on") return;
+  S.recAcc = recElapsed(); S.recState = "paused";
+  const r = S.rec; S.rec = null; try { r?.stop(); } catch {}
+  S.dict = null; renderConsult();
+}
+function resumeMic() {
+  if (S.recState !== "paused") return;
+  S.recState = "on"; S.recStart = Date.now(); listen(S.recVisit); renderConsult();
+}
+async function stopMic() {
+  const id = S.recVisit, r = S.rec;
+  S.rec = null; S.recState = null; clearInterval(S.recT); try { r?.stop(); } catch {}
+  S.dict = null; S.dictDone = id;
+  await saveText(id); refreshConsult();
 }
 // Spoken words go where the cursor is. Words still being recognised are replaced as they firm up.
 function putSpeech(el, text, final) {
@@ -972,9 +1059,14 @@ document.addEventListener("click", e => {
       case "note-sign-ro": await api(`/notes/${v}`, { method: "PUT", body: D.cur.note.content }); await api(`/notes/${v}/sign`, { body: {} }); toast("Signed. Visit complete."); refreshConsult(); break;
       case "cs-next-mic": { const r = await api(`/consultation/next?doctor_id=${v}`, { body: {} }); S.ctab = "dictate"; await new Promise(res => { const once = () => { window.removeEventListener("hashchange", once); setTimeout(res, 300); }; window.addEventListener("hashchange", once); go(`#/consult/${r.id}?doctor=${v}`); }); startMic(r.id); break; }
       case "cs-collapse": S.rightCollapsed = !S.rightCollapsed; renderConsult(); break;
+      case "mic-pause": pauseMic(); break;
+      case "mic-resume": resumeMic(); break;
+      case "mic-stop": await stopMic(); break;
+      case "note-edit": S.noteEdit = true; renderConsult(); break;
+      case "note-done": { const n = D.cur.note; await api(`/notes/${n.id}`, { method: "PUT", body: readNote() }); S.noteEdit = false; toast("Saved"); refreshConsult(); break; }
       case "cs-mic": {
         const cur = D.cur;
-        if (S.rec) { const r = S.rec; S.rec = null; S.recStart = null; clearInterval(S.recT); r.stop(); refreshConsult(); break; }
+        if (S.recState) { await stopMic(); break; }
         if (cur.status === "waiting") { await api(`/visits/${cur.id}/start`, { body: {} }); }
         if (S.ctab === "brief") S.ctab = "dictate";
         await S.reloadConsult(); startMic(cur.id); break; }
@@ -982,8 +1074,9 @@ document.addEventListener("click", e => {
       case "cs-open": go(`#/consult/${v}?doctor=${D.doctorId}`); break;
       case "cs-start": await api(`/visits/${v}/start`, { body: {} }); refreshConsult(); break;
       case "cs-brief": await api(`/visits/${v}/brief`, { body: {} }); toast("Brief updated"); refreshConsult(); break;
-      case "cs-draft": await flushText(); await api(`/visits/${v}/note/draft`, { body: {} }); S.ctab = "note"; toast("Draft ready."); refreshConsult(); break;
-      case "mic": if (S.rec) { const r = S.rec; S.rec = null; S.recStart = null; clearInterval(S.recT); r.stop(); refreshConsult(); } else { S.ctab = "dictate"; startMic(Number(v)); } break;
+      case "cs-draft": await flushText(); if (S.recState) await stopMic(); S.ctab = "note"; S.drafting = Number(v); S.noteEdit = false; renderConsult();
+        try { await api(`/visits/${v}/note/draft`, { body: {} }); } finally { S.drafting = null; S.dictDone = null; } refreshConsult(); break;
+      case "mic": if (S.recState) await stopMic(); else { S.ctab = "dictate"; startMic(Number(v)); } break;
       case "spk": S.speaker = v; document.querySelectorAll('[data-a="spk"]').forEach(b => b.setAttribute("aria-pressed", b.dataset.v === v)); break;
       case "rx-add": { const n = D.cur.note; n.content = readNote(); n.content.rx.push({ medicine: "", dose: "", duration: "", instructions: "" }); rerenderNote(); break; }
       case "rx-del": { const n = D.cur.note; n.content = readNote(); n.content.rx.splice(Number(v), 1); rerenderNote(); break; }

@@ -819,3 +819,40 @@ table.members tr.click:hover td:first-child b { text-decoration-color: var(--ink
   font-family: inherit; font-size: clamp(20px, 2.4vw, 26px); font-weight: 500; line-height: 1.6; color: var(--ink); overflow-y: auto; scrollbar-width: none; caret-color: var(--coral); }
 .live-edit::-webkit-scrollbar { display: none; }
 .live-edit::selection { background: var(--lime); }
+
+/* ---------- dictation dock & note dock (dark pill at the bottom) ---------- */
+.dock { display: flex; align-items: center; gap: 10px; width: min(640px, 100%); min-height: 64px; padding: 8px 8px 8px 24px; border-radius: 999px; background: var(--ink); color: var(--surface); box-shadow: 0 18px 40px -18px #000a; animation: rise .25s var(--ease); }
+.dock .grow { flex: 1; }
+.dock-msg { color: var(--coral); font-weight: 600; font-size: 14px; white-space: nowrap; }
+.dock-msg.ok { color: var(--lime); }
+.dock-text { color: var(--surface); font-weight: 600; font-size: 15px; padding: 10px 0; }
+.dock-ghost { border: 1.5px solid #ffffff2e; background: transparent; color: var(--surface); border-radius: 999px; min-height: 48px; padding: 0 20px; font-weight: 700; font-size: 15px; cursor: pointer; transition: border-color .2s, background .2s; }
+.dock-ghost:hover { border-color: #ffffff70; background: #ffffff0d; }
+.dock-go { border: 0; background: var(--lime); color: var(--ink); border-radius: 999px; min-height: 52px; padding: 0 26px; font-weight: 700; font-size: 16px; cursor: pointer; box-shadow: 0 0 22px -6px color-mix(in srgb, var(--lime) 70%, transparent); transition: transform .2s; }
+.dock-go:hover { transform: translateY(-1px); }
+.dock.rec { padding: 8px 8px 8px 28px; }
+.dock-wave { flex: 1; display: flex; align-items: center; justify-content: space-between; height: 40px; min-width: 0; gap: 4px; }
+.dock-wave i { width: 3px; height: var(--h); border-radius: 2px; background: var(--coral); animation: wv .9s ease-in-out infinite alternate; }
+.dock.rec.paused .dock-wave i { height: 3px; background: #ffffff38; animation: none; }
+.dock.rec.paused .dock-wave i:nth-child(5n + 3) { height: 9px; }
+@keyframes wv { from { transform: scaleY(.35); } to { transform: scaleY(1.15); } }
+.dock-time { font-variant-numeric: tabular-nums; font-size: 13px; font-weight: 600; color: #ffffffa0; min-width: 38px; text-align: right; }
+.dock-round { width: 48px; height: 48px; border-radius: 50%; border: 1.5px solid #ffffff38; background: transparent; color: var(--surface); display: grid; place-items: center; cursor: pointer; transition: border-color .2s, background .2s; }
+.dock-round:hover { border-color: #ffffff80; background: #ffffff10; }
+.dock-stop { width: 52px; height: 52px; border-radius: 50%; border: 0; background: var(--coral); color: var(--ink); display: grid; place-items: center; cursor: pointer; box-shadow: 0 0 0 6px color-mix(in srgb, var(--coral) 22%, transparent); }
+.cx-float .dock { pointer-events: auto; }
+
+/* ---------- note: read view ---------- */
+.soap-read { display: flex; flex-direction: column; gap: 26px; padding-bottom: 110px; }
+.soap-sec { display: grid; grid-template-columns: 40px 1fr; gap: 16px; align-items: start; }
+.soap-tile { width: 40px; height: 40px; border-radius: 12px; background: var(--ink); color: var(--surface); display: grid; place-items: center; font-size: 17px; font-weight: 800; }
+.soap-label { display: block; font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); margin: 2px 0 6px; }
+.soap-body { font-size: 18px; font-weight: 500; line-height: 1.8; color: var(--ink); }
+.nb { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--ink); color: var(--surface); font-size: 11px; font-weight: 700; margin-right: 6px; vertical-align: 2px; }
+.cited { border: 0; background: none; padding: 0; font: inherit; color: #3f6b1f; cursor: pointer; text-decoration: underline dashed color-mix(in srgb, #3f6b1f 70%, transparent); text-decoration-thickness: 1.5px; text-underline-offset: 5px; transition: background .2s; border-radius: 4px; }
+.cited:hover { background: color-mix(in srgb, var(--lime) 35%, transparent); }
+.rx-line { padding: 2px 0; }
+.note-gen { display: flex; flex-direction: column; gap: 14px; padding-top: 18vh; }
+.note-gen i { display: block; height: 14px; border-radius: 999px; background: #9aa69f; animation: shimmer 1.4s ease-in-out infinite; }
+.note-gen i:nth-of-type(1) { width: 86%; } .note-gen i:nth-of-type(2) { width: 68%; animation-delay: .15s; } .note-gen i:nth-of-type(3) { width: 77%; animation-delay: .3s; }
+@keyframes shimmer { 50% { opacity: .45; } }
