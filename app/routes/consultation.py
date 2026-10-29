@@ -8,7 +8,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Up
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 
-from .. import ai, storage
+from .. import ai, printpage, storage
 from ..auth import current_member, member_for_token, require_screen
 from ..db import connect, get_db, log_event, now, row, rows
 from .clinic import clinic_of
@@ -316,8 +316,10 @@ def print_note(note_id: int, token: str, auto: int = 0, db=Depends(get_db)):
     """Printable A4 page in the app's look (browser Print → Save as PDF). Token in the query so it opens in a new tab."""
     me = member_for_token(db, token)
     n = row(db.execute("select * from notes where id = ?", (note_id,)).fetchone())
-    if not me or not n or n["clinic_id"] != me["clinic_id"]:
-        raise HTTPException(404, "Note not found.")
+    if not me:
+        return HTMLResponse(printpage.message("Log in again", "Your session has ended. Open the note from the app."), 401)
+    if not n or n["clinic_id"] != me["clinic_id"]:
+        return HTMLResponse(printpage.message("Note not found", "It may have been removed."), 404)
     c = clinic_of(db, me)
     v = row(db.execute("select * from visits where id = ?", (n["visit_id"],)).fetchone())
     p = row(db.execute("select * from patients where id = ?", (n["patient_id"],)).fetchone())
@@ -330,47 +332,15 @@ def print_note(note_id: int, token: str, auto: int = 0, db=Depends(get_db)):
     rx_html = ("<h2>Prescription</h2><table><tr><th>Medicine</th><th>Dose</th><th>Duration</th><th>Instructions</th></tr>" + "".join(
         f"<tr><td><b>{e(r.get('medicine', ''))}</b></td><td>{e(r.get('dose', ''))}</td><td>{e(r.get('duration', ''))}</td><td>{e(r.get('instructions', ''))}</td></tr>"
         for r in rx) + "</table>") if rx else ""
-    def when(ts):
-        dt = datetime.fromisoformat(ts)
-        return f"{dt.day} {dt.strftime('%b %Y')}, {dt.hour % 12 or 12}:{dt.minute:02d} {'am' if dt.hour < 12 else 'pm'}"
-    vd = Date.fromisoformat(v["date"])
-    visit_day = f"{vd.day} {vd.strftime('%b %Y')}"  # portable: no %-d
     sex = {"M": "Male", "F": "Female", "O": "Other"}.get(p["sex"] or "", "")
     who = " · ".join(x for x in [f"{age(p['dob'])} yrs" if p["dob"] else "", sex, p["uhid"]] if x)
-    signed = f"Signed by {e(d['name'])} · {when(n['signed_at'])}" if n["signed_at"] else "Draft · not signed"
-    return f"""<!doctype html><meta charset="utf-8"><title>{e(p['name'])} · {visit_day}</title>
-<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
-<style>
-@page {{ size: A4; margin: 16mm 14mm; }}
-* {{ box-sizing: border-box; }}
-body {{ font-family: Manrope, system-ui, sans-serif; color: #0B1411; margin: 0; background: #E8F1EC; -webkit-print-color-adjust: exact; print-color-adjust: exact; }}
-.page {{ max-width: 780px; margin: 28px auto; background: #F6FAF7; border-radius: 28px; padding: 40px 44px; }}
-header {{ display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; background: #0B1411; color: #E8F1EC; border-radius: 22px; padding: 22px 26px; }}
-header h1 {{ margin: 0; font-size: 22px; font-weight: 800; letter-spacing: -.01em; }}
-header .lime {{ color: #B6F36B; }}
-header small, header .r small {{ color: #9FB1A9; font-size: 12.5px; font-weight: 600; display: block; margin-top: 4px; }}
-header .r {{ text-align: right; }}
-header .r b {{ font-size: 16px; }}
-.secs {{ display: flex; flex-direction: column; gap: 20px; margin: 30px 0 8px; }}
-.sec {{ display: grid; grid-template-columns: 38px 1fr; gap: 16px; align-items: start; }}
-.tile {{ width: 38px; height: 38px; border-radius: 11px; background: #0B1411; color: #E8F1EC; display: grid; place-items: center; font-size: 16px; font-weight: 800; }}
-.sec small {{ display: block; font-size: 10.5px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: #6B7C75; margin-top: 2px; }}
-.sec p {{ margin: 4px 0 0; font-size: 15.5px; line-height: 1.65; font-weight: 500; }}
-h2 {{ font-size: 11px; font-weight: 700; letter-spacing: .09em; text-transform: uppercase; color: #6B7C75; margin: 30px 0 10px; }}
-table {{ width: 100%; border-collapse: separate; border-spacing: 0; font-size: 14.5px; }}
-th {{ text-align: left; font-size: 10.5px; letter-spacing: .08em; text-transform: uppercase; color: #6B7C75; padding: 0 14px 8px; }}
-td {{ padding: 12px 14px; }}
-tr:nth-child(even) td {{ background: #E8F1EC; }}
-tr:nth-child(even) td:first-child {{ border-radius: 12px 0 0 12px; }} tr:nth-child(even) td:last-child {{ border-radius: 0 12px 12px 0; }}
-footer {{ display: flex; justify-content: space-between; align-items: flex-end; margin-top: 44px; gap: 24px; }}
-footer .s {{ color: #6B7C75; font-size: 13px; font-weight: 600; }}
-footer .sign {{ width: 210px; text-align: center; font-size: 12px; color: #6B7C75; font-weight: 600; padding-top: 44px; background: linear-gradient(#0B1411, #0B1411) bottom 22px center / 100% 1.5px no-repeat; }}
-@media print {{ body {{ background: #fff; }} .page {{ margin: 0; padding: 0; background: #fff; border-radius: 0; max-width: none; }} }}
-</style>
-<div class="page">
-<header><div><h1>{e(c['name'])}</h1><small>{e(' · '.join(x for x in [c['address'], c['phone']] if x))}</small></div>
-<div class="r"><b>{e(p['name'])}</b><small>{e(who)}</small><small><span class="lime">{visit_day}</span> · {e(d['name'])}{' · ' + e(d['speciality']) if d['speciality'] else ''}</small></div></header>
-<div class="secs">{soap or '<p>—</p>'}</div>
-{rx_html}
-<footer><div class="s">{signed}</div><div class="sign">Doctor's signature</div></footer>
-</div>{'<script>onload=()=>setTimeout(print,300)</script>' if auto else ''}"""
+    signed = f"Signed by {e(d['name'])} · {printpage.stamp(n['signed_at'])}" if n["signed_at"] else "Draft · not signed"
+    body = f"""<header><div><h1>{e(c['name'])}</h1><small>{e(' · '.join(x for x in [c['address'], c['phone']] if x))}</small></div>
+<div class="r"><b>{e(p['name'])}</b><small>{e(who)}</small><small><span class="lime">{printpage.day(v['date'])}</span> · {e(d['name'])}{' · ' + e(d['speciality']) if d['speciality'] else ''}</small></div></header>
+<div class="secs">{soap or '<p>—</p>'}</div>{rx_html}
+<footer><div class="s">{signed}</div><div class="sign">Doctor's signature</div></footer>"""
+    note_css = ("<style>.secs{display:flex;flex-direction:column;gap:20px;margin:30px 0 8px}.sec{display:grid;grid-template-columns:38px 1fr;gap:16px;align-items:start}"
+                ".tile{width:38px;height:38px;border-radius:11px;background:#0B1411;color:#E8F1EC;display:grid;place-items:center;font-size:16px;font-weight:800}"
+                ".sec small{display:block;font-size:10.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:#6B7C75;margin-top:2px}"
+                ".sec p{margin:4px 0 0;font-size:15.5px;line-height:1.65;font-weight:500}</style>")
+    return printpage.page(f"{p['name']} · {printpage.day(v['date'])}", note_css + body, auto=bool(auto))

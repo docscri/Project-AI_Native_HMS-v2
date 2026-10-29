@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
+from .. import printpage
 from ..auth import current_member, member_for_token, public_member, require_screen
 from ..db import get_db, log_event, now, row, rows
 from ..rules import (ACTIVE, availability, day_schedule, doctor_fee, find_session, next_arrival_token, now_hhmm, require_bookable,
@@ -389,41 +390,33 @@ def money(n) -> str:
 
 
 @router.get("/visits/{visit_id}/receipt", response_class=HTMLResponse)
-def receipt(visit_id: int, token: str, db=Depends(get_db)):
+def receipt(visit_id: int, token: str, auto: int = 0, db=Depends(get_db)):
     """Printable receipt. The login token is in the query so it opens in a new tab."""
     m = member_for_token(db, token)
     if not m:
-        raise HTTPException(401, "Please log in again.")
+        return HTMLResponse(printpage.message("Log in again", "Your session has ended. Open the receipt from the app."), 401)
     me = public_member(m)
-    v = get_visit(db, me, visit_id)
-    if not v["paid_at"]:
-        raise HTTPException(409, "This visit has not been paid yet.")
+    v = row(db.execute("select * from visits where id = ? and clinic_id = ?", (visit_id, me["clinic_id"])).fetchone())
+    if not v or not v["paid_at"]:
+        return HTMLResponse(printpage.message("No receipt", "This visit has not been paid yet."), 404)
     c = clinic_of(db, me)
     p = row(db.execute("select * from patients where id = ?", (v["patient_id"],)).fetchone())
     d = row(db.execute("select name, speciality from members where id = ?", (v["doctor_id"],)).fetchone())
     e = html.escape
     lines = [("Consultation", money(v["fee"]))]
     if v["discount"]:
-        lines.append((f"{'Waived' if v['discount'] == v['fee'] else 'Discount'} · {e(v['discount_reason'] or '')}", "−" + money(v["discount"])))
+        lines.append((f"{'Waived' if v['discount'] == v['fee'] else 'Discount'}{' · ' + e(v['discount_reason']) if v['discount_reason'] else ''}", "−" + money(v["discount"])))
     if v["refund_amount"]:
-        lines.append((f"Refunded · {e(v['refund_reason'] or '')}", "−" + money(v["refund_amount"])))
-    rows_html = "".join(f"<tr><td>{a}</td><td class=r>{b}</td></tr>" for a, b in lines)
+        lines.append((f"Refunded{' · ' + e(v['refund_reason']) if v['refund_reason'] else ''}", "−" + money(v["refund_amount"])))
     paid = (v["amount_paid"] or 0) - (v["refund_amount"] or 0)
-    return f"""<!doctype html><meta charset="utf-8"><title>Receipt {v['receipt_no']}</title>
-<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&display=swap" rel="stylesheet">
-<style>body{{font-family:Manrope,system-ui,sans-serif;max-width:420px;margin:32px auto;padding:0 16px;color:#0B1411}}
-h1{{font-size:22px;margin:0}}.muted{{color:#5f716a;font-size:13px}}table{{width:100%;border-collapse:collapse;margin:16px 0}}
-td{{padding:8px 0;border-bottom:1px solid #d6e0db}}.r{{text-align:right}}.tot td{{border:0;font-weight:800;font-size:18px}}
-.tag{{display:inline-block;background:#0B1411;color:#B6F36B;border-radius:999px;padding:4px 12px;font-weight:700;font-size:12px}}
-button{{font:inherit;font-weight:700;border:0;background:#B6F36B;border-radius:999px;padding:10px 20px;cursor:pointer;margin-bottom:20px}}
-@media print{{button{{display:none}}}}</style>
-<button onclick="print()">Print</button>
-<h1>{e(c['name'])}</h1><div class="muted">{e(c['address'])}{' · ' + e(c['phone']) if c['phone'] else ''}</div>
-<p><span class="tag">Receipt #{v['receipt_no']}</span></p>
-<div><b>{e(p['name'])}</b> · {e(p['uhid'])}</div>
-<div class="muted">{v['paid_at'][:16].replace('T', ' ')} · {e(d['name'])}</div>
-<table>{rows_html}<tr class="tot"><td>Paid{' · ' + (v['payment_method'] or '').upper() if v['payment_method'] else ''}</td><td class=r>{money(paid)}</td></tr></table>
-<div class="muted">Thank you.</div>"""
+    method = {"cash": "Cash", "upi": "UPI", "card": "Card"}.get(v["payment_method"] or "", "Waived")
+    body = f"""<header><div><h1>{e(c['name'])}</h1><small>{e(' · '.join(x for x in [c['address'], c['phone']] if x))}</small></div>
+<div class="r"><b class="lime">Receipt #{v['receipt_no']}</b><small>{printpage.stamp(v['paid_at'])}</small></div></header>
+<h2>Patient</h2><table><tr><td><b>{e(p['name'])}</b></td><td class="r">{e(p['uhid'])}</td></tr><tr><td>{e(d['name'])}</td><td class="r">{e(d['speciality'] or '')}</td></tr></table>
+<h2>Charges</h2><table>{"".join(f"<tr><td>{a}</td><td class='r'>{b}</td></tr>" for a, b in lines)}</table>
+<div class="total"><small>Paid · {method}</small><b>{money(paid)}</b></div>
+<footer><div class="s">Thank you.</div></footer>"""
+    return printpage.page(f"Receipt {v['receipt_no']}", body, auto=bool(auto), size="A5", narrow=True)
 
 
 @router.get("/doctors")

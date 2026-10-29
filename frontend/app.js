@@ -1042,10 +1042,17 @@ function openLeave(memberId) {
 }
 function printRegister() {
   const r = S.reg, w = window.open("", "_blank");
-  w.document.write(`<!doctype html><title>Register ${r.month}</title><link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;700;800&display=swap" rel="stylesheet">
-    <style>body{font-family:Manrope,sans-serif;color:#0B1411;padding:32px}h1{font-size:22px;margin:0 0 4px}p{color:#5b6b64;margin:0 0 20px}table{width:100%;border-collapse:collapse}th,td{text-align:left;padding:10px 8px;font-size:14px}th{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#5b6b64}tr:nth-child(even) td{background:#E8F1EC}</style>
-    <h1>${esc(S.clinic.name)} · Working days register</h1><p>${new Date(r.month + "-01T00:00").toLocaleDateString("en-IN", { month: "long", year: "numeric" })}</p>
-    <table><tr><th>Name</th><th>Role</th><th>Working days</th><th>Present</th><th>Late</th><th>Leave</th><th>Absent</th></tr>${r.people.map(p => `<tr><td><b>${esc(p.name)}</b></td><td>${esc(p.role || "")}</td><td>${p.working}</td><td>${p.present + p.late + p.half}</td><td>${p.late}</td><td>${p.leave}</td><td>${p.absent}</td></tr>`).join("")}</table><script>onload=()=>print()<\/script>`);
+  const mon = new Date(r.month + "-01T00:00").toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+  w.document.write(`<!doctype html><meta charset="utf-8"><title>Register · ${mon}</title><link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <style>@page{size:A4 landscape;margin:14mm}*{box-sizing:border-box}body{font-family:Manrope,sans-serif;color:#0B1411;margin:0;background:#E8F1EC;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    .page{max-width:980px;margin:28px auto;background:#F6FAF7;border-radius:28px;padding:40px 44px}
+    header{display:flex;justify-content:space-between;align-items:flex-start;background:#0B1411;color:#E8F1EC;border-radius:22px;padding:22px 26px;margin-bottom:26px}
+    h1{margin:0;font-size:22px;font-weight:800}small{color:#9FB1A9;font-size:12.5px;font-weight:600;display:block;margin-top:4px}.lime{color:#B6F36B;font-weight:800;font-size:16px}
+    table{width:100%;border-collapse:separate;border-spacing:0;font-size:14.5px}th{text-align:left;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:#6B7C75;padding:0 14px 8px}
+    td{padding:12px 14px}td.n,th.n{text-align:center}tr:nth-child(even) td{background:#E8F1EC}tr:nth-child(even) td:first-child{border-radius:12px 0 0 12px}tr:nth-child(even) td:last-child{border-radius:0 12px 12px 0}
+    td small{color:#6B7C75;margin:0}@media print{body{background:#fff}.page{margin:0;padding:0;background:#fff;border-radius:0;max-width:none}}</style>
+    <div class="page"><header><div><h1>${esc(S.clinic.name)}</h1><small>Working days register</small></div><div style="text-align:right"><span class="lime">${mon}</span><small>${r.people.length} ${r.people.length === 1 ? "person" : "people"}</small></div></header>
+    <table><tr><th>Name</th><th class="n">Working days</th><th class="n">Present</th><th class="n">Late</th><th class="n">Leave</th><th class="n">Absent</th></tr>${r.people.map(p => `<tr><td><b>${esc(p.name)}</b><small>${esc(p.role || "")}</small></td><td class="n">${p.working}</td><td class="n">${p.present + p.late + p.half}</td><td class="n">${p.late}</td><td class="n">${p.leave}</td><td class="n">${p.absent}</td></tr>`).join("")}</table></div><script>onload=()=>setTimeout(print,300)<\/script>`);
   w.document.close();
 }
 
