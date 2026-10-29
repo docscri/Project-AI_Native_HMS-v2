@@ -865,3 +865,10 @@ table.members tr.click:hover td:first-child b { text-decoration-color: var(--ink
 .cx-side-btn i { display: block; height: 2.5px; border-radius: 2px; background: var(--surface); width: 18px; }
 .cx-side-btn i + i { width: 11px; }
 .cx-side-btn:hover { transform: scale(1.06); }
+.cx-status { height: 34px; box-sizing: border-box; }
+.cx-side-btn { width: 34px; height: 34px; padding-left: 9px; gap: 4px; }
+.cx-side-btn i { width: 15px; height: 2px; }
+.cx-side-btn i + i { width: 9px; }
+.cx-right-top { display: flex; align-items: center; gap: 14px; }
+.cx-right-top .cx-seg { flex: 1; }
+.cx-side-btn.close { padding: 0; align-items: center; justify-content: center; color: var(--surface); font-size: 20px; line-height: 1; font-weight: 400; border-color: #ffffff2a; }

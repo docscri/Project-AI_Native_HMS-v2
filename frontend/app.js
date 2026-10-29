@@ -639,7 +639,7 @@ function dock(v) {
     return `<div class="dock"><span class="dock-msg">Transcript finalized.</span><span class="grow"></span><button class="dock-ghost" data-a="cs-mic" data-v="${v.id}">Dictate more</button><button class="dock-go" data-a="cs-draft" data-v="${v.id}">Generate SOAP note</button></div>`;
   return micBtn(v);
 }
-const sideBtn = () => `<button class="cx-side-btn" data-a="cs-collapse" aria-label="${S.rightCollapsed ? "Show side panel" : "Hide side panel"}" title="${S.rightCollapsed ? "Show side panel" : "Hide side panel"}"><i></i><i></i></button>`;
+const sideBtn = () => !S.rightCollapsed ? "" : `<button class="cx-side-btn" data-a="cs-collapse" aria-label="${S.rightCollapsed ? "Show side panel" : "Hide side panel"}" title="${S.rightCollapsed ? "Show side panel" : "Hide side panel"}"><i></i><i></i></button>`;
 function micBtn(v, small) {
   return `<button class="mic-dot ${small ? "sm" : ""}" data-a="cs-mic" data-v="${v.id}" aria-label="Dictate">${icon.mic}</button>`;
 }
@@ -745,7 +745,7 @@ function noteDock(v) {
 }
 function rightCol() {
   const D = S.data, p = D.profile;
-  const tabs = `<div class="cx-seg"><button data-a="cs-side" data-v="profile" aria-pressed="${S.cside !== "citations"}">Profile</button><button data-a="cs-side" data-v="citations" aria-pressed="${S.cside === "citations"}">Citations</button></div>`;
+  const tabs = `<div class="cx-right-top"><button class="cx-side-btn close" data-a="cs-collapse" aria-label="Hide side panel" title="Hide side panel">×</button><div class="cx-seg"><button data-a="cs-side" data-v="profile" aria-pressed="${S.cside !== "citations"}">Profile</button><button data-a="cs-side" data-v="citations" aria-pressed="${S.cside === "citations"}">Citations</button></div></div>`;
   if (S.cside === "citations") return `${tabs}${citations(D.cur)}`;
   if (!p) return `${tabs}<div class="cx-empty">—</div>`;
   return `${tabs}<div class="cx-rows">
