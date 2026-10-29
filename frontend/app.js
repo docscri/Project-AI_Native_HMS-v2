@@ -943,7 +943,7 @@ async function viewAdmin(tab, sub) {
   if (tab === "rules") body = `<section class="panel" style="max-width:700px">${rulesForm("ad", S.clinic)}
     ${editable ? `<div class="save-row"><button class="btn primary" data-a="ad-rules">Save</button></div>` : ""}</section>`;
   if (tab === "team" && editable && sub && sub !== "members") body = await teamView(sub);
-  else if (tab === "money" && editable) body = await moneyView(sub || "today");
+  else if (tab === "money" && editable) body = await moneyView();
   else if (tab === "team") {
     const ms = await api("/members");
     body = `<section class="panel scroll"><table class="t members"><thead><tr><th>Name</th><th>Phone</th><th>Email</th><th>Role</th><th>Department</th><th>Status</th></tr></thead><tbody>
@@ -964,8 +964,7 @@ async function viewAdmin(tab, sub) {
 
 /* ---------- administration: team & collections ---------- */
 const TEAM_TABS = [["members", "Members"], ["today", "Today"], ["leave", "Leave"], ["register", "Register"]];
-const MONEY_TABS = [["today", "Today"], ["range", "Range"], ["close", "Day close"]];
-const subTabs = (tab, cur) => `<div class="seg sub-seg">${(tab === "team" ? TEAM_TABS : MONEY_TABS).map(([k, l]) => `<button data-a="ad-sub" data-t="${tab}" data-v="${k}" aria-pressed="${k === cur}">${l}</button>`).join("")}</div>`;
+const subTabs = (tab, cur) => `<div class="seg sub-seg">${TEAM_TABS.map(([k, l]) => `<button data-a="ad-sub" data-t="${tab}" data-v="${k}" aria-pressed="${k === cur}">${l}</button>`).join("")}</div>`;
 const ATT = { present: ["Present", "s-paid"], late: ["Late", "s-waiting"], half: ["Half day", "s-waiting"], absent: ["Absent", "s-no_show"], leave: ["Leave", "s-soft"], off: ["Off", "s-soft"], due: ["Not in yet", "s-booked"] };
 const LEAVE_TYPES = [["casual", "Casual"], ["sick", "Sick"], ["earned", "Earned"], ["other", "Other"]];
 const LEAVE_ST = { pending: ["Pending", "s-waiting"], approved: ["Approved", "s-paid"], rejected: ["Rejected", "s-no_show"], cancelled: ["Cancelled", "s-cancelled"] };
@@ -1007,28 +1006,52 @@ function moneyTiles(t) {
   return `<div class="tiles-row"><div class="tk big"><small>Net</small><b>${rupees(t.net)}</b></div><div class="tk"><small>Cash</small><b>${rupees(m.cash)}</b></div><div class="tk"><small>UPI</small><b>${rupees(m.upi)}</b></div><div class="tk"><small>Card</small><b>${rupees(m.card)}</b></div></div>
     <div class="tiles-row"><div class="tk"><small>Visits</small><b>${t.visits}</b></div><div class="tk"><small>Refunds</small><b>${rupees(t.refunded)}</b></div><div class="tk"><small>Discounts</small><b>${rupees(t.discounts)}</b></div><div class="tk"><small>Waived</small><b>${t.waived}</b></div></div>`;
 }
-async function moneyView(sub) {
-  S.mon = S.mon || { from: addDays(TODAY, -6), to: TODAY, doc: "", date: TODAY };
-  if (sub === "today") {
-    const t = await api(`/collections?start=${TODAY}`);
-    const line = (v, amt, extra) => `<div class="r q coll-row"><span class="num muted">${v.receipt_no ? "#" + v.receipt_no : ""}</span><span class="who"><b>${esc(v.patient_name)}</b></span><span class="muted">${extra}</span><b class="num">${amt}</b><button class="btn small" data-a="receipt" data-v="${v.id}">Receipt</button></div>`;
-    return `${subTabs("money", "today")}<section class="panel">${moneyTiles(t)}</section>
-      <section class="panel"><span class="label">Payments</span><div class="rows">${t.payments.map(v => line(v, rupees(v.amount_paid), v.amount_paid ? (v.payment_method || "").toUpperCase() : "Waived")).join("")}
-        ${t.refunds.map(v => line(v, "−" + rupees(v.refund_amount), "Refund · " + esc(v.refund_reason || ""))).join("")}${t.payments.length || t.refunds.length ? "" : `<div class="empty">—</div>`}</div></section>`;
-  }
-  if (sub === "range") {
-    const f = S.mon, t = await api(`/collections?start=${f.from}&end=${f.to}${f.doc ? "&doctor_id=" + f.doc : ""}`);
-    return `${subTabs("money", "range")}<section class="panel"><div class="range-bar"><label class="field">From<input type="date" id="mr-from" max="${TODAY}" value="${f.from}"></label><label class="field">To<input type="date" id="mr-to" max="${TODAY}" value="${f.to}"></label>
-        <label class="field">Doctor<select id="mr-doc"><option value="">All doctors</option>${S.doctors.map(d => `<option value="${d.id}" ${String(d.id) === f.doc ? "selected" : ""}>${esc(d.name)}</option>`).join("")}</select></label><button class="btn primary" data-a="mr-go">Show</button></div>${moneyTiles(t)}</section>
-      <section class="panel scroll"><table class="t"><thead><tr><th>Date</th><th>Visits</th><th>Cash</th><th>UPI</th><th>Card</th><th>Refunds</th><th>Net</th></tr></thead><tbody>
-        ${t.days.map(d => `<tr><td><b>${niceDate(d.date)}</b></td><td class="num">${d.visits}</td><td class="num">${rupees(d.by_method.cash)}</td><td class="num">${rupees(d.by_method.upi)}</td><td class="num">${rupees(d.by_method.card)}</td><td class="num">${rupees(d.refunded)}</td><td class="num"><b>${rupees(d.net)}</b></td></tr>`).join("") || `<tr><td colspan="7" class="muted">—</td></tr>`}</tbody></table></section>`;
-  }
-  const c = await api(`/day-close?date=${S.mon.date}`), done = c.closed, diff = done ? done.counted_cash - done.system_cash : 0;
-  return `${subTabs("money", "close")}<section class="panel close-panel"><div class="range-bar"><label class="field">Date<input type="date" id="dc-date" max="${TODAY}" value="${S.mon.date}" data-a="dc-date"></label></div>
-      <div class="tiles-row"><div class="tk big"><small>Cash in system</small><b>${rupees(c.system_cash)}</b></div>${done ? `<div class="tk"><small>Counted</small><b>${rupees(done.counted_cash)}</b></div><div class="tk ${diff ? "bad" : "good"}"><small>Difference</small><b>${diff > 0 ? "+" : ""}${rupees(diff).replace("₹-", "−₹")}</b></div>` : ""}</div>
-      <div class="grid2"><label class="field">Cash counted (₹)<input type="number" min="0" id="dc-cash" value="${done ? done.counted_cash : ""}"></label><label class="field">Note<input id="dc-note" value="${esc(done?.note || "")}"></label></div>
-      <div class="save-row"><button class="btn primary" data-a="dc-save">${done ? "Update" : "Close day"}</button></div></section>
-    ${c.past.length ? `<section class="panel"><span class="label">Closed days</span><div class="rows">${c.past.map(p => { const d = p.counted_cash - p.system_cash; return `<div class="r close-row"><span class="num"><b>${niceDate(p.date)}</b></span><span class="muted">${esc(p.closed_by_name || "")}</span><span class="num">${rupees(p.system_cash)} → ${rupees(p.counted_cash)}</span><span class="pill ${d ? "s-no_show" : "s-paid"}">${d ? (d > 0 ? "+" : "−") + rupees(Math.abs(d)) : "Matched"}</span></div>`; }).join("")}</div></section>` : ""}`;
+const RANGES = [["today", "Today"], ["yesterday", "Yesterday"], ["week", "This week"], ["month", "This month"]];
+function rangeOf(k) {
+  const t = new Date(TODAY + "T00:00");
+  if (k === "yesterday") return [addDays(TODAY, -1), addDays(TODAY, -1)];
+  if (k === "week") return [addDays(TODAY, -((t.getDay() + 6) % 7)), TODAY];
+  if (k === "month") return [TODAY.slice(0, 8) + "01", TODAY];
+  return [TODAY, TODAY];
+}
+async function moneyView() {
+  S.mon = S.mon || { from: TODAY, to: TODAY, doc: "" };
+  const f = S.mon, t = await api(`/collections?start=${f.from}&end=${f.to}${f.doc ? "&doctor_id=" + f.doc : ""}`);
+  S.monData = t;
+  const one = f.from === f.to, quick = RANGES.find(([k]) => { const [a, b] = rangeOf(k); return a === f.from && b === f.to; })?.[0];
+  const line = (v, amt, extra) => `<div class="r q coll-row"><span class="num muted">${v.receipt_no ? "#" + v.receipt_no : ""}</span><span class="who"><b>${esc(v.patient_name)}</b><small class="muted"> · ${esc(v.doctor_name)}</small></span><span class="muted">${extra}</span><b class="num">${amt}</b><button class="btn small" data-a="receipt" data-v="${v.id}">Receipt</button></div>`;
+  const dash = n => n ? n : `<span class="muted">—</span>`;
+  const tot = t.by_doctor.reduce((a, d) => ({ seen: a.seen + d.seen, walk_ins: a.walk_ins + d.walk_ins, no_shows: a.no_shows + d.no_shows, collected: a.collected + d.collected, refunded: a.refunded + d.refunded, net: a.net + d.net }), { seen: 0, walk_ins: 0, no_shows: 0, collected: 0, refunded: 0, net: 0 });
+  return `<div class="bar-row"><div class="seg">${RANGES.map(([k, l]) => `<button data-a="mr-quick" data-v="${k}" aria-pressed="${k === quick}">${l}</button>`).join("")}</div><span class="grow"></span><button class="btn" data-a="mr-print">Print</button></div>
+    <section class="panel"><div class="range-bar"><label class="field">From<input type="date" id="mr-from" max="${TODAY}" value="${f.from}"></label><label class="field">To<input type="date" id="mr-to" max="${TODAY}" value="${f.to}"></label>
+      <label class="field">Doctor<select id="mr-doc"><option value="">All doctors</option>${S.doctors.map(d => `<option value="${d.id}" ${String(d.id) === f.doc ? "selected" : ""}>${esc(d.name)}</option>`).join("")}</select></label><button class="btn primary" data-a="mr-go">Show</button></div>
+      ${moneyTiles(t)}</section>
+    <section class="panel scroll"><span class="label">By doctor</span><table class="t doc-table"><thead><tr><th>Doctor</th><th class="n">Patients seen</th><th class="n">Walk-ins</th><th class="n">No-shows</th><th class="n">Collected</th><th class="n">Refunds</th><th class="n">Net</th></tr></thead><tbody>
+      ${t.by_doctor.map(d => `<tr class="click" data-a="mr-doc" data-v="${d.id}"><td>${person({ name: d.name, role: d.speciality || "Doctor" })}</td><td class="n"><b>${d.seen}</b></td><td class="n">${dash(d.walk_ins)}</td><td class="n">${dash(d.no_shows)}</td><td class="n">${rupees(d.collected)}</td><td class="n">${d.refunded ? rupees(d.refunded) : dash(0)}</td><td class="n"><b>${rupees(d.net)}</b></td></tr>`).join("") || `<tr><td colspan="7" class="muted">—</td></tr>`}
+      ${t.by_doctor.length > 1 ? `<tr class="tot-row"><td><b>Total</b></td><td class="n"><b>${tot.seen}</b></td><td class="n">${tot.walk_ins}</td><td class="n">${tot.no_shows}</td><td class="n">${rupees(tot.collected)}</td><td class="n">${rupees(tot.refunded)}</td><td class="n"><b>${rupees(tot.net)}</b></td></tr>` : ""}</tbody></table></section>
+    ${one ? `<section class="panel"><span class="label">Payments</span><div class="rows">${t.payments.map(v => line(v, rupees(v.amount_paid), v.amount_paid ? (v.payment_method || "").toUpperCase() : "Waived")).join("")}
+        ${t.refunds.map(v => line(v, "−" + rupees(v.refund_amount), "Refund · " + esc(v.refund_reason || ""))).join("")}${t.payments.length || t.refunds.length ? "" : `<div class="empty">—</div>`}</div></section>`
+      : `<section class="panel scroll"><span class="label">Day by day</span><table class="t"><thead><tr><th>Date</th><th class="n">Visits</th><th class="n">Cash</th><th class="n">UPI</th><th class="n">Card</th><th class="n">Refunds</th><th class="n">Net</th></tr></thead><tbody>
+        ${t.days.map(d => `<tr><td><b>${niceDate(d.date)}</b></td><td class="n">${d.visits}</td><td class="n">${rupees(d.by_method.cash)}</td><td class="n">${rupees(d.by_method.upi)}</td><td class="n">${rupees(d.by_method.card)}</td><td class="n">${rupees(d.refunded)}</td><td class="n"><b>${rupees(d.net)}</b></td></tr>`).join("") || `<tr><td colspan="7" class="muted">—</td></tr>`}</tbody></table></section>`}`;
+}
+function printCollections() {
+  const t = S.monData, f = S.mon, w = window.open("", "_blank"), m = t.by_method;
+  const span = f.from === f.to ? niceDate(f.from) : `${niceDate(f.from)} – ${niceDate(f.to)}`;
+  const doc = f.doc ? S.doctors.find(d => String(d.id) === f.doc)?.name : "All doctors";
+  w.document.write(`<!doctype html><meta charset="utf-8"><title>Collections · ${span}</title><link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">
+    <style>@page{size:A4;margin:14mm}*{box-sizing:border-box}body{font-family:Manrope,sans-serif;color:#0B1411;margin:0;background:#E8F1EC;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+    .page{max-width:860px;margin:28px auto;background:#F6FAF7;border-radius:28px;padding:40px 44px}header{display:flex;justify-content:space-between;align-items:flex-start;background:#0B1411;color:#E8F1EC;border-radius:22px;padding:22px 26px}
+    h1{margin:0;font-size:22px;font-weight:800}small{color:#9FB1A9;font-size:12.5px;font-weight:600;display:block;margin-top:4px}.lime{color:#B6F36B;font-weight:800;font-size:16px}
+    .tiles{display:flex;gap:10px;margin:22px 0 6px}.tk{flex:1;background:#E8F1EC;border-radius:16px;padding:12px 16px}.tk.big{background:#0B1411;color:#B6F36B}.tk small{color:#6B7C75;margin:0 0 2px;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase}.tk b{font-size:20px}
+    h2{font-size:11px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;color:#6B7C75;margin:26px 0 10px}table{width:100%;border-collapse:separate;border-spacing:0;font-size:14px}th{text-align:left;font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;color:#6B7C75;padding:0 12px 8px}
+    td{padding:11px 12px}.n{text-align:right}tr:nth-child(even) td{background:#E8F1EC}tr:nth-child(even) td:first-child{border-radius:12px 0 0 12px}tr:nth-child(even) td:last-child{border-radius:0 12px 12px 0}tr.tot td{background:#0B1411;color:#E8F1EC;font-weight:800}tr.tot td:first-child{border-radius:12px 0 0 12px}tr.tot td:last-child{border-radius:0 12px 12px 0;color:#B6F36B}
+    @media print{body{background:#fff}.page{margin:0;padding:0;background:#fff;border-radius:0;max-width:none}}</style>
+    <div class="page"><header><div><h1>${esc(S.clinic.name)}</h1><small>Collections · ${esc(doc)}</small></div><div style="text-align:right"><span class="lime">${span}</span><small>${t.visits} paid visits</small></div></header>
+    <div class="tiles"><div class="tk big"><small style="color:#9FB1A9">Net</small><b>${rupees(t.net)}</b></div><div class="tk"><small>Cash</small><b>${rupees(m.cash)}</b></div><div class="tk"><small>UPI</small><b>${rupees(m.upi)}</b></div><div class="tk"><small>Card</small><b>${rupees(m.card)}</b></div><div class="tk"><small>Refunds</small><b>${rupees(t.refunded)}</b></div></div>
+    <h2>By doctor</h2><table><tr><th>Doctor</th><th class="n">Patients seen</th><th class="n">Walk-ins</th><th class="n">No-shows</th><th class="n">Collected</th><th class="n">Refunds</th><th class="n">Net</th></tr>
+    ${t.by_doctor.map(d => `<tr><td><b>${esc(d.name)}</b></td><td class="n">${d.seen}</td><td class="n">${d.walk_ins}</td><td class="n">${d.no_shows}</td><td class="n">${rupees(d.collected)}</td><td class="n">${rupees(d.refunded)}</td><td class="n"><b>${rupees(d.net)}</b></td></tr>`).join("")}
+    <tr class="tot"><td>Total</td><td class="n">${t.by_doctor.reduce((a, d) => a + d.seen, 0)}</td><td class="n">${t.by_doctor.reduce((a, d) => a + d.walk_ins, 0)}</td><td class="n">${t.by_doctor.reduce((a, d) => a + d.no_shows, 0)}</td><td class="n">${rupees(t.collected)}</td><td class="n">${rupees(t.refunded)}</td><td class="n">${rupees(t.net)}</td></tr></table></div><script>onload=()=>setTimeout(print,300)<\/script>`);
+  w.document.close();
 }
 function openLeave(memberId) {
   const admin = S.me.is_admin && !memberId?.self;
@@ -1061,7 +1084,7 @@ document.addEventListener("click", e => {
   const t = e.target.closest("[data-a]"); if (!t) return;
   const a = t.dataset.a, v = t.dataset.v;
   if (a === "scrim") { if (e.target === t && M?.kind !== "sched") closeModal(); return; }
-  if (["lim", "dc-date", "lvm-m", "lvm-y", "rgm-m", "rgm-y", "free-text", "up-file", "mg-q", "vf-q", "vf-doc", "pay-disc", "bk-q", "pt-q", "cs-q", "bk-date", "bk-doc", "sc-doc", "sc-month-picker", "sc-year-picker", "cs-doc"].includes(a)) return;
+  if (["lim", "lvm-m", "lvm-y", "rgm-m", "rgm-y", "free-text", "up-file", "mg-q", "vf-q", "vf-doc", "pay-disc", "bk-q", "pt-q", "cs-q", "bk-date", "bk-doc", "sc-doc", "sc-month-picker", "sc-year-picker", "cs-doc"].includes(a)) return;
   e.preventDefault();
   const D = S.data;
   run(async () => {
@@ -1193,7 +1216,9 @@ document.addEventListener("click", e => {
         M?.kind === "account" ? openAccount() : route(); break; }
       case "reg-print": printRegister(); break;
       case "mr-go": Object.assign(S.mon, { from: $("#mr-from").value, to: $("#mr-to").value, doc: $("#mr-doc").value }); route(); break;
-      case "dc-save": await api("/day-close", { body: { date: S.mon.date, counted_cash: Number($("#dc-cash").value) || 0, note: $("#dc-note").value } }); toast("Day closed"); route(); break;
+      case "mr-quick": { const [a, b] = rangeOf(v); Object.assign(S.mon, { from: a, to: b }); route(); break; }
+      case "mr-doc": S.mon.doc = S.mon.doc === v ? "" : v; route(); break;
+      case "mr-print": printCollections(); break;
       case "att-in": case "att-out": await api(`/attendance/check-${a === "att-in" ? "in" : "out"}`, { body: {} }); toast(a === "att-in" ? "Checked in" : "Checked out"); openAccount(); break;
       case "my-leave": openLeave({ self: true }); break;
       case "mb-schedule": closeModal(); await openSchedules(Number(v)); break;
@@ -1267,7 +1292,6 @@ document.addEventListener("change", e => {
   const a = e.target.dataset?.a;
   if (a === "ops-date") { S.date = e.target.value || TODAY; route(); }
   if (/^(lvm|rgm)-[my]$/.test(a)) { const [y, m] = S.adm.month.split("-").map(Number); const nm = a.endsWith("-m") ? Number(e.target.value) : m, ny = a.endsWith("-y") ? Number(e.target.value) : y; S.adm.month = `${ny}-${String(nm).padStart(2, "0")}`; route(); }
-  if (a === "dc-date") { S.mon.date = e.target.value || TODAY; route(); }
   if (a === "vf-doc") { S.vf.doc = e.target.value; const r = $("#ops-rows"); if (r && S.data?.visits) r.innerHTML = opsRows(S.data.visits); }
   if (a === "bk-date") { M.date = e.target.value || TODAY; run(loadAvail); }
   if (a === "bk-doc") { M.doctorId = Number(e.target.value); run(loadAvail); }

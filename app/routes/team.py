@@ -319,7 +319,24 @@ def collections(start: str, end: str | None = None, doctor_id: int | None = None
         if t["visits"] or t["refunded"]:
             days.append({"date": k, **t})
         d += timedelta(days=1)
-    return {"start": start, "end": end, **totals(paid, refunds), "days": days, "payments": paid, "refunds": refunds}
+    # Per doctor: patients by visit date, money by payment date (same as the totals above).
+    vis = rows(db.execute(
+        f"""select v.doctor_id, v.status, v.is_walk_in from visits v where v.clinic_id = ? and v.date between ? and ?{doc}""",
+        (me["clinic_id"], start, end, *extra)))
+    docs = rows(db.execute("select id, name, speciality from members where clinic_id = ? and kind = 'doctor' order by name", (me["clinic_id"],)))
+    by_doctor = []
+    for d in docs:
+        if doctor_id and d["id"] != doctor_id:
+            continue
+        mine = [v for v in vis if v["doctor_id"] == d["id"]]
+        t = totals([v for v in paid if v["doctor_id"] == d["id"]], [v for v in refunds if v["doctor_id"] == d["id"]])
+        row_ = {"id": d["id"], "name": d["name"], "speciality": d["speciality"],
+                "seen": sum(v["status"] == "done" for v in mine), "walk_ins": sum(bool(v["is_walk_in"]) and v["status"] != "cancelled" for v in mine),
+                "no_shows": sum(v["status"] == "no_show" for v in mine), "collected": t["collected"], "refunded": t["refunded"], "net": t["net"]}
+        if any(row_[k] for k in ("seen", "walk_ins", "no_shows", "collected", "refunded")) or doctor_id:
+            by_doctor.append(row_)
+    return {"start": start, "end": end, **totals(paid, refunds), "days": days, "payments": paid, "refunds": refunds,
+            "by_doctor": by_doctor, "seen": sum(r["seen"] for r in by_doctor)}
 
 
 class Close(BaseModel):

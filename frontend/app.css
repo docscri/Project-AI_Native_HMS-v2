@@ -920,3 +920,8 @@ table.members tr.click:hover td:first-child b { text-decoration-color: var(--ink
 .nv-body .soap-read { padding-bottom: 8px; }
 .nv-body span.cited { cursor: default; }
 .nv-dock { margin: 0 18px 18px; width: auto; animation: none; }
+.doc-table th.n, .doc-table td.n, .panel table.t th.n, .panel table.t td.n { text-align: right; }
+.doc-table tr.click:hover td { background: color-mix(in srgb, var(--lime) 18%, transparent); }
+.doc-table tr.tot-row td { background: var(--ink); color: var(--surface); }
+.doc-table tr.tot-row td:first-child { border-radius: 14px 0 0 14px; } .doc-table tr.tot-row td:last-child { border-radius: 0 14px 14px 0; color: var(--lime); }
+.panel { flex-shrink: 0; }

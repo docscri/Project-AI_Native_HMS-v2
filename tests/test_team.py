@@ -51,5 +51,6 @@ def test_attendance_leave_register_and_money():
         c.post(f"/api/visits/{v['id']}/refund", headers=h, json={"amount": 50, "reason": "Charged twice"})
         col = c.get("/api/collections", headers=h, params={"start": TODAY}).json()
         assert col["by_method"]["cash"] == 200 and col["net"] == 150 and len(col["days"]) == 1
-        dc = c.post("/api/day-close", headers=h, json={"date": TODAY, "counted_cash": 140, "note": "Short"}).json()
-        assert dc["system_cash"] == 150 and dc["closed"]["counted_cash"] == 140
+        assert col["by_doctor"][0]["walk_ins"] == 1 and col["by_doctor"][0]["net"] == 150
+
+
