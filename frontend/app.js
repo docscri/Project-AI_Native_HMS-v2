@@ -503,7 +503,7 @@ function renderSched() {
 function leaveEditor() {
   const l = M.leave;
   return `<div class="hit choices"><h3>${l.all ? "Clinic holiday" : `${esc(S.doctors.find(d => d.id === M.doctorId)?.name || "Doctor")} · Leave`}</h3>
-    <div class="grid2"><label class="field">From<input type="date" id="lv-from" min="${TODAY}" value="${l.from}"></label><label class="field">To<input type="date" id="lv-to" min="${TODAY}" value="${l.to}"></label></div>
+    <div class="date-row"><input class="date-pill" aria-label="From" type="date" id="lv-from" min="${TODAY}" value="${l.from}"><input class="date-pill" aria-label="To" type="date" id="lv-to" min="${TODAY}" value="${l.to}"></div>
     <div class="foot"><button class="btn" data-a="lv-back">Back</button><button class="btn" data-a="lv-save" data-v="0">Working</button><button class="btn primary" data-a="lv-save" data-v="1">${l.all ? "Holiday" : "Leave"}</button></div></div>`;
 }
 
@@ -1012,7 +1012,7 @@ async function moneyView() {
   S.monData = t;
   const dash = n => n ? n : `<span class="muted">—</span>`;
   const tot = t.by_doctor.reduce((a, d) => ({ seen: a.seen + d.seen, walk_ins: a.walk_ins + d.walk_ins, no_shows: a.no_shows + d.no_shows, collected: a.collected + d.collected, refunded: a.refunded + d.refunded, net: a.net + d.net }), { seen: 0, walk_ins: 0, no_shows: 0, collected: 0, refunded: 0, net: 0 });
-  return `<div class="bar-row money-bar"><label class="field">From<input type="date" id="mr-from" max="${TODAY}" value="${f.from}" data-a="mr-range"></label><label class="field">To<input type="date" id="mr-to" max="${TODAY}" value="${f.to}" data-a="mr-range"></label><button class="btn" data-a="mr-print">Print</button></div>
+  return `<div class="bar-row money-bar"><input class="date-pill" aria-label="From" type="date" id="mr-from" max="${TODAY}" value="${f.from}" data-a="mr-range"><input class="date-pill" aria-label="To" type="date" id="mr-to" max="${TODAY}" value="${f.to}" data-a="mr-range"><button class="btn" data-a="mr-print">Print</button></div>
     <section class="panel">${moneyTiles(t)}</section>
     <section class="panel scroll"><span class="label">By doctor</span><table class="t doc-table"><thead><tr><th>Doctor</th><th class="n">Patients seen</th><th class="n">Walk-ins</th><th class="n">No-shows</th><th class="n">Collected</th><th class="n">Refunds</th><th class="n">Net</th></tr></thead><tbody>
       ${t.by_doctor.map(d => `<tr><td>${person({ name: d.name, role: d.speciality || "Doctor" })}</td><td class="n"><b>${d.seen}</b></td><td class="n">${dash(d.walk_ins)}</td><td class="n">${dash(d.no_shows)}</td><td class="n">${rupees(d.collected)}</td><td class="n">${d.refunded ? rupees(d.refunded) : dash(0)}</td><td class="n"><b>${rupees(d.net)}</b></td></tr>`).join("") || `<tr><td colspan="7" class="muted">—</td></tr>`}
@@ -1045,7 +1045,7 @@ function openLeave(memberId) {
   modal(`<h2>Leave</h2>
     ${admin ? `<label class="field">Person<select id="lv-who">${(S.members || []).filter(m => m.status === "active").map(m => `<option value="${m.id}" ${m.id === memberId ? "selected" : ""}>${esc(m.name)}</option>`).join("")}</select></label>` : ""}
     <div class="seg" id="lv-type">${LEAVE_TYPES.map(([k, l]) => `<button data-a="lv-type" data-v="${k}" aria-pressed="${k === "casual"}">${l}</button>`).join("")}</div>
-    <div class="grid2"><label class="field">From<input type="date" id="lvn-from" value="${TODAY}"></label><label class="field">To<input type="date" id="lvn-to" value="${TODAY}"></label></div>
+    <div class="date-row"><input class="date-pill" aria-label="From" type="date" id="lvn-from" value="${TODAY}"><input class="date-pill" aria-label="To" type="date" id="lvn-to" value="${TODAY}"></div>
     <label class="field">Reason<input id="lvn-why"></label>
     <div class="foot"><button class="btn" data-a="close">Back</button><button class="btn primary" data-a="lvn-save">${S.me.is_admin ? "Save" : "Request"}</button></div>`);
 }
@@ -1348,7 +1348,7 @@ function makeDropdown(sel) {
 }
 function makeDatePicker(inp) {
   inp.dataset.dd = "1";
-  const wrap = document.createElement("div"); wrap.className = "dd date" + (inp.classList.contains("top-date") ? " top-date" : "");
+  const wrap = document.createElement("div"); wrap.className = "dd date" + (inp.classList.contains("top-date") ? " top-date" : "") + (inp.classList.contains("date-pill") ? " date-pill" : "");
   const btn = document.createElement("button"); btn.type = "button"; btn.className = "dd-btn";
   const menu = document.createElement("div"); menu.className = "dd-menu cal-pop";
   let view = (inp.value || TODAY).slice(0, 7);

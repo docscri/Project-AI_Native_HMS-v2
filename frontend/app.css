@@ -928,3 +928,9 @@ table.members tr.click:hover td:first-child b { text-decoration-color: var(--ink
 .money-bar { align-items: flex-end; }
 .money-bar .field { flex: 0 1 240px; }
 .money-bar .btn { margin-left: auto; min-height: 52px; }
+/* date pickers without From/To labels: plain pills the size of a button */
+.dd.date-pill { width: 200px; flex: 0 0 auto; }
+.dd.date-pill .dd-btn { min-height: 48px; padding-top: 0; padding-bottom: 0; }
+.date-row { display: flex; gap: 10px; flex-wrap: wrap; }
+.money-bar { align-items: center; }
+.money-bar .btn { min-height: 48px; }
