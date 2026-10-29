@@ -92,3 +92,12 @@ def test_deactivated_member_is_signed_out():
         assert c.get("/api/me", headers=auth(st)).status_code == 200
         c.patch(f"/api/members/{m['id']}", headers=auth(t), json={"status": "inactive"})
         assert c.get("/api/me", headers=auth(st)).status_code == 401
+
+
+def test_edit_own_profile():
+    from fastapi.testclient import TestClient
+    from app.main import app
+    with TestClient(app) as c:
+        h = {"Authorization": "Bearer " + c.post("/api/onboarding/owner", json={"name": "Dr. Me", "email": "me1@x.in", "password": "clinic123"}).json()["token"]}
+        m = c.put("/api/me", headers=h, json={"name": "Dr.  Me  Two", "email": "me2@x.in", "phone": "9847000000", "speciality": "Paediatrics"}).json()
+        assert m["name"] == "Dr. Me Two" and m["email"] == "me2@x.in" and m["speciality"] == "Paediatrics"

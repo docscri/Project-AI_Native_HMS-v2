@@ -143,6 +143,28 @@ def me_(me=Depends(current_member), db=Depends(get_db)):
     return {"member": me, "clinic": public_clinic(clinic_of(db, me))}
 
 
+class MyProfile(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    email: str
+    phone: str = ""
+    speciality: str = ""      # doctors
+    designation: str = ""     # staff
+
+
+@router.put("/me")
+def edit_me(body: MyProfile, me=Depends(current_member), db=Depends(get_db)):
+    """Anyone can change their own details."""
+    email = clean_email(body.email)
+    if db.execute("select 1 from members where lower(email) = lower(?) and id != ?", (email, me["id"])).fetchone():
+        raise HTTPException(409, "Email already registered.")
+    db.execute("update members set name = ?, email = ?, phone = ?, speciality = ?, designation = ? where id = ?",
+               (" ".join(body.name.split()), email, clean_phone(body.phone),
+                body.speciality.strip() or None if me["kind"] == "doctor" else None,
+                body.designation.strip() or None if me["kind"] != "doctor" else me.get("designation"), me["id"]))
+    log_event(db, me["clinic_id"], me["id"], "member", me["id"], "updated")
+    return public_member(row(db.execute("select * from members where id = ?", (me["id"],)).fetchone()))
+
+
 # ---------- onboarding ----------
 
 class Owner(BaseModel):

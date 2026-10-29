@@ -475,8 +475,8 @@ function openRegister(name) {
 }
 
 /* schedules */
-async function openSchedules(doctorId) {
-  M = { kind: "sched", doctorId: doctorId || S.doctors[0]?.id, month: (S.date || TODAY).slice(0, 7), days: [], sel: null };
+async function openSchedules(doctorId, own) {
+  M = { kind: "sched", own: !!own, doctorId: doctorId || S.doctors[0]?.id, month: (S.date || TODAY).slice(0, 7), days: [], sel: null };
   await loadMonth();
 }
 async function loadMonth() { M.days = await api(`/schedules/${M.doctorId}?month=${M.month}`); renderSched(); }
@@ -492,13 +492,13 @@ function renderSched() {
       <div id="so-lim" class="choices" ${sel.off ? 'style="opacity:.35;pointer-events:none"' : ""}>${limitBlock("so", base)}</div>
       <div class="foot"><button class="btn" data-a="sc-reset" ${sel.override ? "" : "disabled"}>Default</button><button class="btn primary" data-a="sc-save">Save</button></div></div>`;
   }
-  modal(`<div class="actions" style="justify-content:space-between;align-items:center"><h2>Doctor schedules</h2>
-      <select class="input" style="width:auto" id="sc-doc" data-a="sc-doc">${S.doctors.map(d => `<option value="${d.id}" ${d.id === s.doctorId ? "selected" : ""}>${esc(d.name)}</option>`).join("")}</select></div>
+  modal(`<div class="actions" style="justify-content:space-between;align-items:center"><h2>${s.own ? "My schedule" : "Doctor schedules"}</h2>
+      ${s.own ? "" : `<select class="input" style="width:auto" id="sc-doc" data-a="sc-doc">${S.doctors.map(d => `<option value="${d.id}" ${d.id === s.doctorId ? "selected" : ""}>${esc(d.name)}</option>`).join("")}</select>`}</div>
     <div class="actions month-picker-wrap"><div class="month-picker"><span>Month</span><select data-a="sc-month-picker" aria-label="Choose schedule month">${Array.from({ length: 12 }, (_, i) => `<option value="${i + 1}" ${i + 1 === m ? "selected" : ""}>${new Date(2000, i, 1).toLocaleDateString("en-IN", { month: "long" })}</option>`).join("")}</select><select data-a="sc-year-picker" aria-label="Choose schedule year">${scheduleYears.map(n => `<option value="${n}" ${n === y ? "selected" : ""}>${n}</option>`).join("")}</select></div></div>
     <div class="cal">${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(d => `<span class="dow">${d}</span>`).join("")}${"<span></span>".repeat(lead)}
       ${s.days.map(d => `<button class="${d.off ? "off" : ""} ${d.override ? "ovr" : ""}" data-a="sc-day" data-v="${d.date}" aria-pressed="${d.date === s.sel}" ${d.date < TODAY ? "disabled" : ""}><b>${Number(d.date.slice(8))}</b>${d.off ? "Off" : `${d.schedule.start}–${d.schedule.end}`}</button>`).join("")}</div>
     ${s.leave ? leaveEditor() : editor}
-    <div class="foot">${s.leave ? "" : `<button class="btn" data-a="lv-open" data-v="doc">Doctor off</button>${S.me.is_admin ? `<button class="btn" data-a="lv-open" data-v="all">Clinic holiday</button>` : ""}`}<button class="btn" data-a="close-refresh">Close</button></div>`, true);
+    <div class="foot">${s.leave ? "" : `<button class="btn" data-a="lv-open" data-v="doc">${s.own ? "Days off" : "Doctor off"}</button>${S.me.is_admin && !s.own ? `<button class="btn" data-a="lv-open" data-v="all">Clinic holiday</button>` : ""}`}<button class="btn" data-a="close-refresh">Close</button></div>`, true);
 }
 function leaveEditor() {
   const l = M.leave;
@@ -551,11 +551,13 @@ function copyLink(link, msg) {
   navigator.clipboard?.writeText(link).then(() => toast(msg), () => { M = { kind: "link" }; modal(`<h2>Share this link</h2><label class="field">Link<input readonly value="${esc(link)}" onfocus="this.select()"></label><div class="foot"><button class="btn primary" data-a="close">Done</button></div>`); });
 }
 function openAccount() {
-  const m = S.me; M = { kind: "account" };
-  modal(`<div class="mb-head"><div class="avatar big">${esc(firstName(m.name)[0].toUpperCase())}</div><div><h2>${esc(m.name)}</h2><span class="muted">${esc(m.email)}</span></div></div>
+  const m = S.me, doc = m.kind === "doctor"; M = { kind: "account" };
+  modal(`<div class="mb-head"><div class="avatar big">${esc(initials(m.name))}</div><div><h2>${esc(m.name)}</h2><span class="muted">${esc(doc ? m.speciality || "Doctor" : m.designation || "Staff")}</span></div></div>
+    <div class="grid2"><label class="field">Name<input id="ac-name" value="${esc(m.name)}"></label><label class="field">${doc ? "Speciality" : "Designation"}<input id="ac-role" value="${esc((doc ? m.speciality : m.designation) || "")}"></label></div>
+    <div class="grid2"><label class="field">Email<input id="ac-email" type="email" value="${esc(m.email)}"></label><label class="field">Phone<input id="ac-phone" value="${esc(m.phone || "")}"></label></div>
     <label class="field">Current password<input id="ac-cur" type="password" autocomplete="current-password"></label>
     <div class="grid2"><label class="field">New password<input id="ac-new" type="password" autocomplete="new-password"></label><label class="field">Repeat new password<input id="ac-new2" type="password" autocomplete="new-password"></label></div>
-    <div class="foot"><button class="btn danger" data-a="logout" style="margin-right:auto">Log out</button><button class="btn" data-a="close">Close</button><button class="btn primary" data-a="pw-save">Change password</button></div>`);
+    <div class="foot"><button class="btn danger" data-a="logout" style="margin-right:auto">Log out</button>${doc ? `<button class="btn" data-a="my-schedule">My schedule</button>` : ""}<button class="btn" data-a="close">Close</button><button class="btn primary" data-a="ac-save">Save</button></div>`);
 }
 function copyInvite(code, msg) {
   const link = `${location.origin}/#/invite/${code}`;
@@ -947,6 +949,14 @@ document.addEventListener("click", e => {
       case "renew-invite": { const r = await api(`/members/${v}/invite`, { body: {} }); copyLink(`${location.origin}/#/invite/${r.invite_code}`, r.email_sent ? "Invite emailed · link copied" : "Invite link copied · valid 7 days"); break; }
       case "reset-link": { const r = await api(`/members/${v}/reset-link`, { body: {} }); copyLink(`${location.origin}/#/reset/${r.code}`, "Reset link copied · valid 2 hours"); break; }
       case "account": openAccount(); break;
+      case "ac-save": {
+        const nw = $("#ac-new").value;
+        if (nw && nw !== $("#ac-new2").value) return toast("New passwords don't match", true);
+        const doc = S.me.kind === "doctor", role = $("#ac-role").value;
+        const me = await api("/me", { method: "PUT", body: { name: $("#ac-name").value, email: $("#ac-email").value, phone: $("#ac-phone").value, speciality: doc ? role : "", designation: doc ? "" : role } });
+        if (nw) await api("/auth/change-password", { body: { current: $("#ac-cur").value, new: nw } });
+        S.me = me; S.doctors = await api("/doctors"); closeModal(); toast("Saved"); route(); break; }
+      case "my-schedule": await openSchedules(S.me.id, true); break;
       case "pw-save": {
         if ($("#ac-new").value !== $("#ac-new2").value) return toast("New passwords don't match", true);
         await api("/auth/change-password", { body: { current: $("#ac-cur").value, new: $("#ac-new").value } }); closeModal(); toast("Password changed"); break; }

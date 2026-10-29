@@ -877,3 +877,5 @@ table.members tr.click:hover td:first-child b { text-decoration-color: var(--ink
 .cx-head .cx-top-right:has(.cx-side-btn) { margin-right: -18px; }
 .cx-head .cx-side-btn { transform: translateX(14px); }
 .cx-head .cx-side-btn:hover { transform: translateX(14px) scale(1.06); }
+/* sentence numbers as superscripts */
+.nb { width: 15px; height: 15px; font-size: 9px; margin: 0 4px 0 1px; vertical-align: super; position: relative; top: -2px; }
