@@ -875,3 +875,5 @@ table.members tr.click:hover td:first-child b { text-decoration-color: var(--ink
 .cx-side-btn.close { background: transparent; border: 1.5px solid #ffffff30; color: #ffffffc0; transition: border-color .2s, color .2s, transform .2s; }
 .cx-side-btn.close:hover { border-color: var(--lime); color: var(--lime); transform: translateX(2px); }
 .cx-head .cx-top-right:has(.cx-side-btn) { margin-right: -18px; }
+.cx-head .cx-side-btn { transform: translateX(14px); }
+.cx-head .cx-side-btn:hover { transform: translateX(14px) scale(1.06); }
