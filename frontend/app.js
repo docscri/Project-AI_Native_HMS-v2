@@ -691,7 +691,7 @@ const freeText = v => S.ft?.id === v.id ? S.ft.text : (v.text || "");
 const SOAP = [["S", "Subjective"], ["O", "Objective"], ["A", "Assessment"], ["P", "Plan"]];
 function paneNote(v) {
   const n = v.note, signed = n?.status === "signed";
-  if (S.drafting === v.id) return `<div class="note-gen"><span class="label">Note · Writing</span><i></i><i></i><i></i></div>`;
+  if (S.drafting === v.id) return `<div class="note-gen"><i></i><i></i><i></i></div>`;
   if (!n) return `<div class="cx-empty">—</div>`;
   if (S.noteEdit && !signed) return noteEditor(n, false);
   let num = 0;
@@ -1075,7 +1075,7 @@ document.addEventListener("click", e => {
       case "cs-start": await api(`/visits/${v}/start`, { body: {} }); refreshConsult(); break;
       case "cs-brief": await api(`/visits/${v}/brief`, { body: {} }); toast("Brief updated"); refreshConsult(); break;
       case "cs-draft": await flushText(); if (S.recState) await stopMic(); S.ctab = "note"; S.drafting = Number(v); S.noteEdit = false; renderConsult();
-        try { await api(`/visits/${v}/note/draft`, { body: {} }); } finally { S.drafting = null; S.dictDone = null; } refreshConsult(); break;
+        try { await Promise.all([api(`/visits/${v}/note/draft`, { body: {} }), new Promise(r => setTimeout(r, 1400))]); } finally { S.drafting = null; S.dictDone = null; } refreshConsult(); break;
       case "mic": if (S.recState) await stopMic(); else { S.ctab = "dictate"; startMic(Number(v)); } break;
       case "spk": S.speaker = v; document.querySelectorAll('[data-a="spk"]').forEach(b => b.setAttribute("aria-pressed", b.dataset.v === v)); break;
       case "rx-add": { const n = D.cur.note; n.content = readNote(); n.content.rx.push({ medicine: "", dose: "", duration: "", instructions: "" }); rerenderNote(); break; }

@@ -856,3 +856,8 @@ table.members tr.click:hover td:first-child b { text-decoration-color: var(--ink
 .note-gen i { display: block; height: 14px; border-radius: 999px; background: #9aa69f; animation: shimmer 1.4s ease-in-out infinite; }
 .note-gen i:nth-of-type(1) { width: 86%; } .note-gen i:nth-of-type(2) { width: 68%; animation-delay: .15s; } .note-gen i:nth-of-type(3) { width: 77%; animation-delay: .3s; }
 @keyframes shimmer { 50% { opacity: .45; } }
+.note-gen { padding-top: 16vh; gap: 16px; }
+.note-gen i { position: relative; overflow: hidden; height: 13px; background: #8a938e; animation: none; }
+.note-gen i::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, #ffffff55, transparent); transform: translateX(-100%); animation: sweep 1.3s ease-in-out infinite; }
+.note-gen i:nth-of-type(2)::after { animation-delay: .15s; } .note-gen i:nth-of-type(3)::after { animation-delay: .3s; }
+@keyframes sweep { to { transform: translateX(100%); } }
