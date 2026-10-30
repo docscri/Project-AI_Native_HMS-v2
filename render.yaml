@@ -22,3 +22,7 @@ services:
         sync: false
       - key: DEMO_NAME
         sync: false
+      - key: DEEPGRAM_API_KEY      # optional: live dictation
+        sync: false
+      - key: GEMINI_API_KEY        # optional: AI notes
+        sync: false

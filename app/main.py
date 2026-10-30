@@ -7,7 +7,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import db
-from .routes import clinic, consultation, operations, patients, schedules, team
+from .routes import clinic, consultation, dictation, operations, patients, schedules, team
 
 FRONTEND = Path(__file__).resolve().parent.parent / "frontend"
 
@@ -19,7 +19,7 @@ def bad_value(request, exc):
     """Bad input is a 422, not a 500."""
     from fastapi.responses import JSONResponse
     return JSONResponse({"detail": "Check the dates."}, status_code=422)
-for r in (clinic, schedules, patients, operations, consultation, team):
+for r in (clinic, schedules, patients, operations, consultation, dictation, team):
     app.include_router(r.router)
 
 

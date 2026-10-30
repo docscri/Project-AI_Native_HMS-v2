@@ -90,6 +90,7 @@ async function boot() {
   await run(async () => {
     const r = await api("/me");
     S.me = r.member; S.clinic = r.clinic; S.doctors = await api("/doctors");
+    api("/dictation").then(d => { S.dictBy = d.provider; }, () => {});
   });
   route();
 }
@@ -824,9 +825,10 @@ function readNote() {
   const rx = [...document.querySelectorAll("#rx tbody tr")].filter(tr => tr.querySelector("input")).map(tr => Object.fromEntries([...tr.querySelectorAll("input")].map(i => [i.dataset.f, i.value])));
   return { soap, rx };
 }
+// Deepgram when the server has a key, else the browser's own speech recognition.
 function startMic(visitId) {
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!SR) { refreshConsult(); return toast("Use Chrome to dictate", true); }
+  if (S.dictBy !== "deepgram" && !SR) { refreshConsult(); return toast("Use Chrome to dictate", true); }
   Object.assign(S, { recState: "on", recVisit: visitId, recAcc: 0, recStart: Date.now(), dict: null, dictDone: null });
   listen(visitId);
   clearInterval(S.recT); S.recT = setInterval(() => { const t = $("#dock-timer"); if (t) t.textContent = fmtClock(recElapsed()); }, 500);
@@ -834,6 +836,7 @@ function startMic(visitId) {
 }
 const recElapsed = () => (S.recAcc || 0) + (S.recState === "on" && S.recStart ? Date.now() - S.recStart : 0);
 function listen(visitId) {
+  if (S.dictBy === "deepgram") return streamMic(visitId);
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
   const r = new SR(); r.lang = "en-IN"; r.continuous = true; r.interimResults = true;
   S.dict = null;
@@ -856,7 +859,7 @@ function listen(visitId) {
 function pauseMic() {
   if (S.recState !== "on") return;
   S.recAcc = recElapsed(); S.recState = "paused";
-  const r = S.rec; S.rec = null; try { r?.stop(); } catch {}
+  const r = S.rec; S.rec = null; try { if (r?.finish) S.finishing = r.finish().catch(() => {}); else r?.stop(); } catch {}
   S.dict = null; renderConsult();
 }
 function resumeMic() {
@@ -865,9 +868,68 @@ function resumeMic() {
 }
 async function stopMic() {
   const id = S.recVisit, r = S.rec;
-  S.rec = null; S.recState = null; clearInterval(S.recT); try { r?.stop(); } catch {}
+  S.rec = null; S.recState = null; clearInterval(S.recT);
+  try { r?.finish ? await r.finish() : r?.stop(); } catch {}
   S.dict = null; S.dictDone = id;
   await saveText(id); refreshConsult();
+}
+function speech(visitId, text, final) {
+  const el = $("#free-text"); if (!el || el.readOnly || Number(el.dataset.v) !== visitId) return;
+  if (!S.dict || (!S.dict.len && document.activeElement === el)) S.dict = { start: document.activeElement === el ? el.selectionEnd : el.value.length, len: 0 };
+  putSpeech(el, final ? text + " " : text, final);
+  edit(visitId, el.value);
+}
+// Mic → 16 kHz PCM frames (ported from Project-Dictate). The AudioContext is made at the click, before any await.
+const audioContext = () => { const C = window.AudioContext || window.webkitAudioContext; const c = new C({ latencyHint: "interactive" }); c.resume().catch(() => {}); return c; };
+async function micCapture(onFrame, onLost) {
+  const ctx = S.audioCtx || audioContext(); S.audioCtx = null;
+  let stream, node, src, mute, on = false, stopped = false, flushed;
+  const stop = async ({ flush = false } = {}) => {
+    if (stopped) return; stopped = true;
+    if (flush && node && on) await new Promise(r => { flushed = r; node.port.postMessage("flush"); setTimeout(r, 150); });
+    on = false;
+    if (node) { node.port.onmessage = null; node.disconnect(); node.port.close(); }
+    src?.disconnect(); mute?.disconnect();
+    stream?.getTracks().forEach(t => { t.onended = null; t.stop(); });
+    if (ctx.state !== "closed") await ctx.close().catch(() => {});
+  };
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+    await ctx.resume();
+    await ctx.audioWorklet.addModule("/static/pcm-worklet.js");
+    node = new AudioWorkletNode(ctx, "dictate-pcm", { numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1] });
+    node.port.onmessage = ({ data }) => { if (data.type === "audio" && on) onFrame(data.frame); if (data.type === "flushed") flushed?.(); };
+    src = ctx.createMediaStreamSource(stream); mute = ctx.createGain(); mute.gain.value = 0;
+    src.connect(node); node.connect(mute); mute.connect(ctx.destination);
+    stream.getTracks().forEach(t => { t.onended = () => { if (!stopped) { stop(); onLost(); } }; });
+  } catch (e) { await stop(); throw e; }
+  return { start: () => { on = true; }, stop };
+}
+// Deepgram via the server. Text lands in the writing box and is saved by the normal autosave.
+async function streamMic(visitId) {
+  const rec = { stop() {}, async finish() {} };
+  S.rec = rec; S.dict = null;
+  const fail = msg => { if (S.rec !== rec) return; toast(msg, true); stopMic(); };
+  let ws, mic;
+  try { mic = await micCapture(f => ws?.readyState === 1 && ws.send(f), () => fail("Microphone disconnected")); }
+  catch { S.audioCtx = null; return fail("Allow the microphone to dictate"); }
+  await S.finishing;   // a paused stream must close before the next one opens
+  if (S.rec !== rec) return mic.stop();
+  ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/visits/${visitId}/dictate`, ["dictate", S.token]);
+  let closed; const done = new Promise(r => { closed = r; });
+  const timer = setTimeout(() => fail("Dictation couldn't connect"), 10000);
+  ws.onmessage = ({ data }) => {
+    const m = JSON.parse(data);
+    if (m.type === "ready") { clearTimeout(timer); mic.start(); }
+    else if (m.type === "transcript") speech(visitId, m.text, m.final);
+    else if (m.type === "error") { clearTimeout(timer); fail(m.message); }
+  };
+  ws.onclose = () => { clearTimeout(timer); closed(); fail("Dictation stopped. Try again."); };
+  rec.stop = () => { clearTimeout(timer); mic.stop(); ws.close(); };
+  rec.finish = async () => {   // send the last audio, then wait for Deepgram's last words
+    clearTimeout(timer); await mic.stop({ flush: true });
+    if (ws.readyState === 1) { ws.send("stop"); await Promise.race([done, new Promise(r => setTimeout(r, 8000))]); } else ws.close();
+  };
 }
 function putSpeech(el, text, final) {
   const d = S.dict, before = el.value.slice(0, d.start);
@@ -1297,6 +1359,7 @@ document.addEventListener("click", e => {
       case "cs-mic": {
         const cur = D.cur;
         if (S.recState) { await stopMic(); break; }
+        if (S.dictBy === "deepgram") S.audioCtx = audioContext();
         if (cur.status === "waiting") { await api(`/visits/${cur.id}/start`, { body: {} }); }
         if (S.ctab === "brief") S.ctab = "dictate";
         await S.reloadConsult(); startMic(cur.id); break; }

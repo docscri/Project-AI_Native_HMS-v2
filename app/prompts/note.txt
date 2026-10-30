@@ -8,3 +8,6 @@ Return JSON only:
 - Keep each section short and clinical. Leave a section empty if nothing supports it.
 - Every non-empty section must cite the evidence ids it came from.
 - Prescribe only medicines the doctor actually said. Empty rx list if none.
+- Never invent diagnoses, findings, medicines, doses, tests or plans.
+- Keep negatives ("no fever") and uncertainty ("possible", "rule out") as said.
+- Symptoms and history go in S, examination and values in O, the doctor's stated impression in A, next steps in P.

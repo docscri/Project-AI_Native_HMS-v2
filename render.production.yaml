@@ -38,3 +38,5 @@ services:
         sync: false
       - key: GEMINI_API_KEY        # optional: leave empty to keep patient data away from AI services
         sync: false
+      - key: DEEPGRAM_API_KEY      # optional: live dictation; empty uses the browser's speech recognition
+        sync: false
