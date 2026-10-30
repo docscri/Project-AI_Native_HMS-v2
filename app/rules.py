@@ -44,6 +44,25 @@ def parse_sessions(raw, start=None, end=None) -> list[dict]:
     return [{"start": start, "end": end}] if start and end else []
 
 
+def valid_day(day: str | None, required: bool = True) -> str | None:
+    """A real calendar date (YYYY-MM-DD), checked before anything is saved."""
+    if not day and not required:
+        return None
+    try:
+        return Date.fromisoformat(str(day)).isoformat() if re.fullmatch(r"\d{4}-\d{2}-\d{2}", str(day)) else Date.fromisoformat("x")
+    except ValueError:
+        raise HTTPException(422, "Check the dates.")
+
+
+def clinic_doctor(db, me: dict, doctor_id: int) -> dict:
+    """The doctor must belong to the caller's clinic and not be deactivated; anything else looks like it doesn't exist."""
+    d = db.execute("select * from members where id = ? and clinic_id = ? and kind = 'doctor' and status != 'inactive'",
+                   (doctor_id, me["clinic_id"])).fetchone()
+    if not d:
+        raise HTTPException(404, "Doctor not found.")
+    return dict(d)
+
+
 def validate_sessions(sessions: list[dict]) -> list[dict]:
     if not sessions:
         raise HTTPException(422, "Add at least one session.")

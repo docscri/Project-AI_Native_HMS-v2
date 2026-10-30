@@ -1,5 +1,6 @@
 """Team (attendance, leave, monthly register) and Collections (money in, refunds, day close)."""
 import calendar
+import re
 import json
 from datetime import date as Date, timedelta
 
@@ -8,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from ..auth import current_member, require_admin
 from ..db import get_db, log_event, now, row, rows
-from ..rules import day_schedule
+from ..rules import day_schedule, valid_day
 from .clinic import clinic_of
 from .schedules import Override, save_day
 
@@ -131,6 +132,9 @@ class Mark(BaseModel):
 @router.put("/attendance/{member_id}/{date}")
 def mark(member_id: int, date: str, body: Mark, me=Depends(require_admin), db=Depends(get_db)):
     """Admin marks or corrects someone's day."""
+    date = valid_day(date)
+    if body.check_in and not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", body.check_in):
+        raise HTTPException(422, "Use times like 09:30.")
     if not db.execute("select 1 from members where id = ? and clinic_id = ?", (member_id, me["clinic_id"])).fetchone():
         raise HTTPException(404, "Member not found.")
     if date > Date.today().isoformat():
@@ -211,6 +215,7 @@ def bookings_between(db, member_id: int, start: str, end: str) -> int:
 @router.post("/leave")
 def request_leave(body: LeaveIn, me=Depends(current_member), db=Depends(get_db)):
     try:
+        body.start_date, body.end_date = valid_day(body.start_date), valid_day(body.end_date)
         a, b = Date.fromisoformat(body.start_date), Date.fromisoformat(body.end_date)
     except ValueError:
         raise HTTPException(422, "Pick valid dates.")
@@ -303,8 +308,8 @@ def money_rows(db, me, kind: str, start: str, end: str, doctor_id: int | None) -
 
 def totals(paid: list[dict], refunds: list[dict]) -> dict:
     by = {k: sum(v["amount"] for v in paid if v["payment_method"] == k) for k in ("cash", "upi", "card")}
-    refunded = sum(v["amount"] for v in refunds)
-    return {"by_method": by, "collected": sum(by.values()), "refunded": refunded, "net": sum(by.values()) - refunded,
+    refunded, collected = sum(v["amount"] for v in refunds), sum(v["amount"] for v in paid)
+    return {"by_method": by, "collected": collected, "refunded": refunded, "net": collected - refunded,
             "discounts": sum(v["discount"] or 0 for v in paid), "waived": sum(1 for v in paid if not v["amount"]),
             "visits": len(paid)}
 
@@ -363,6 +368,7 @@ def day_close(date: str, me=Depends(require_admin), db=Depends(get_db)):
 
 @router.post("/day-close")
 def close_day(body: Close, me=Depends(require_admin), db=Depends(get_db)):
+    body.date = valid_day(body.date)
     sys_cash = day_close(body.date, me, db)["system_cash"]
     db.execute(
         """insert into day_close (clinic_id, date, system_cash, counted_cash, note, closed_by, closed_at) values (?, ?, ?, ?, ?, ?, ?)

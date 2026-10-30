@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from ..auth import current_member
 from ..db import get_db, log_event, now, row
-from ..rules import availability, day_schedule, validate_sessions
+from ..rules import availability, clinic_doctor, day_schedule, valid_day, validate_sessions
 from .clinic import clinic_of
 
 router = APIRouter(prefix="/api")
@@ -83,6 +83,7 @@ def bookings_on(db, doctor_ids: list[int], days: list[str]) -> int:
 
 @router.put("/schedules/{doctor_id}/{date}")
 def set_day(doctor_id: int, date: str, body: Override, me=Depends(current_member), db=Depends(get_db)):
+    date = valid_day(date)
     doctor(db, me, doctor_id)
     can_edit(me, doctor_id)
     save_day(db, me, doctor_id, date, body)
@@ -102,6 +103,7 @@ class Leave(BaseModel):
 def leave(body: Leave, me=Depends(current_member), db=Depends(get_db)):
     """Leave for one doctor, or a clinic holiday for everyone, over a range of dates."""
     try:
+        body.start_date, body.end_date = valid_day(body.start_date), valid_day(body.end_date)
         a, b = Date.fromisoformat(body.start_date), Date.fromisoformat(body.end_date)
     except ValueError:
         raise HTTPException(422, "Pick valid dates.")
@@ -140,6 +142,8 @@ def leave(body: Leave, me=Depends(current_member), db=Depends(get_db)):
 
 @router.delete("/schedules/{doctor_id}/{date}")
 def reset_day(doctor_id: int, date: str, me=Depends(current_member), db=Depends(get_db)):
+    date = valid_day(date)
+    doctor(db, me, doctor_id)
     can_edit(me, doctor_id)
     db.execute("delete from schedule_overrides where doctor_id = ? and date = ? and clinic_id = ?",
                (doctor_id, date, me["clinic_id"]))
@@ -149,5 +153,6 @@ def reset_day(doctor_id: int, date: str, me=Depends(current_member), db=Depends(
 @router.get("/availability")
 def get_availability(doctor_id: int, date: str, exclude_visit: int | None = None, session: str | None = None,
                      me=Depends(current_member), db=Depends(get_db)):
-    doctor(db, me, doctor_id)
+    date = valid_day(date)
+    clinic_doctor(db, me, doctor_id)
     return availability(db, clinic_of(db, me), doctor_id, date, exclude_visit, session)

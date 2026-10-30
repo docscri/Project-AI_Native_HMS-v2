@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from .. import printpage
 from ..auth import current_member, member_for_token, public_member, require_screen
 from ..db import get_db, log_event, now, row, rows
-from ..rules import (ACTIVE, availability, day_schedule, doctor_fee, find_session, next_arrival_token, now_hhmm, require_bookable,
+from ..rules import (ACTIVE, availability, clinic_doctor, valid_day, day_schedule, doctor_fee, find_session, next_arrival_token, now_hhmm, require_bookable,
                      token_time)
 from .clinic import clinic_of
 
@@ -59,7 +59,8 @@ def visit_rows(db, me, where: str, args: tuple) -> list[dict]:
     clinic = clinic_of(db, me)
     letters = doctor_letters(db, me["clinic_id"])
     vs = rows(db.execute(
-        f"""select {VISIT_FIELDS}, p.name as patient_name, p.uhid, p.phone, p.dob, p.sex, m.name as doctor_name,
+        f"""select {VISIT_FIELDS}, (select coalesce(sum(case when kind = 'payment' then amount else -amount end), 0)
+                 from payments where visit_id = v.id) as refundable, p.name as patient_name, p.uhid, p.phone, p.dob, p.sex, m.name as doctor_name,
               (select count(*) from documents d where d.visit_id = v.id) as doc_count
             from visits v join patients p on p.id = v.patient_id join members m on m.id = v.doctor_id
             where v.clinic_id = ? and {where}
@@ -102,6 +103,7 @@ def auto_no_show(db, me, day: str) -> None:
 @router.get("/operations/day")
 def day_view(date: str, me=Depends(front_desk), db=Depends(get_db)):
     """Doctor cards for the date, plus every visit that day."""
+    date = valid_day(date)
     auto_no_show(db, me, date)
     clinic = clinic_of(db, me)
     letters = doctor_letters(db, me["clinic_id"])
@@ -127,6 +129,8 @@ def day_view(date: str, me=Depends(front_desk), db=Depends(get_db)):
 @router.get("/operations/queue")
 def queue(doctor_id: int, date: str, me=Depends(front_desk), db=Depends(get_db)):
     """One doctor's four columns. Waiting is in queue order."""
+    date = valid_day(date)
+    clinic_doctor(db, me, doctor_id)
     auto_no_show(db, me, date)
     clinic = clinic_of(db, me)
     vs = visit_rows(db, me, "v.doctor_id = ? and v.date = ?", (doctor_id, date))
@@ -230,6 +234,8 @@ def visit_out(db, me, visit_id: int) -> dict:
 
 @router.post("/visits")
 def book(body: Booking, me=Depends(front_desk), db=Depends(get_db)):
+    body.date = valid_day(body.date)
+    clinic_doctor(db, me, body.doctor_id)
     db.lock(f"tokens:{body.doctor_id}:{body.date}")
     if body.date < Date.today().isoformat():
         raise HTTPException(422, "Pick today or a later date.")
@@ -238,6 +244,8 @@ def book(body: Booking, me=Depends(front_desk), db=Depends(get_db)):
 
 def create_booking(db, me, patient_id, doctor_id, day, session=None, wanted=None, follow_up_of=None) -> dict:
     """Book a patient. Callers hold the token lock for this doctor and day."""
+    day = valid_day(day)
+    clinic_doctor(db, me, doctor_id)
     clinic = clinic_of(db, me)
     check_patient_free(db, me, patient_id, doctor_id, day)
     avail = require_bookable(db, clinic, doctor_id, day, session=session)
@@ -259,6 +267,7 @@ def create_booking(db, me, patient_id, doctor_id, day, session=None, wanted=None
 def walk_in(body: WalkIn, me=Depends(front_desk), db=Depends(get_db)):
     """Patient at the counter, no booking: pay, get the next token, go straight to Waiting."""
     today = Date.today().isoformat()
+    clinic_doctor(db, me, body.doctor_id)
     db.lock(f"tokens:{body.doctor_id}:{today}")
     clinic = clinic_of(db, me)
     check_patient_free(db, me, body.patient_id, body.doctor_id, today)
@@ -369,6 +378,8 @@ def toggle_late(visit_id: int, me=Depends(front_desk), db=Depends(get_db)):
 
 @router.post("/visits/{visit_id}/reschedule")
 def reschedule(visit_id: int, body: Reschedule, me=Depends(front_desk), db=Depends(get_db)):
+    body.date = valid_day(body.date)
+    clinic_doctor(db, me, body.doctor_id)
     db.lock(f"tokens:{body.doctor_id}:{body.date}")
     v = get_visit(db, me, visit_id)
     if v["status"] != "booked":
@@ -395,6 +406,8 @@ def cancel(visit_id: int, body: Cancel, me=Depends(front_desk), db=Depends(get_d
 
 @router.post("/operations/end-session")
 def end_session(doctor_id: int, date: str, session: str | None = None, me=Depends(front_desk), db=Depends(get_db)):
+    date = valid_day(date)
+    clinic_doctor(db, me, doctor_id)
     """Mark everyone still in Booked as no-show (the automatic rule runs at session end too)."""
     n = 0
     for v in rows(db.execute("select * from visits where clinic_id = ? and doctor_id = ? and date = ? and status = 'booked'",
@@ -472,6 +485,8 @@ def add_to_waitlist(db, me, patient_id, doctor_id, day, session=None) -> dict:
 
 @router.post("/waitlist")
 def join_waitlist(body: WaitIn, me=Depends(front_desk), db=Depends(get_db)):
+    body.date = valid_day(body.date)
+    clinic_doctor(db, me, body.doctor_id)
     if body.date < Date.today().isoformat():
         raise HTTPException(422, "Pick today or a later date.")
     return add_to_waitlist(db, me, body.patient_id, body.doctor_id, body.date, body.session)
@@ -479,6 +494,8 @@ def join_waitlist(body: WaitIn, me=Depends(front_desk), db=Depends(get_db)):
 
 @router.get("/waitlist")
 def waitlist(doctor_id: int, date: str, me=Depends(front_desk), db=Depends(get_db)):
+    date = valid_day(date)
+    clinic_doctor(db, me, doctor_id)
     """Who is waiting for a place, oldest first, and whether a place is open now."""
     items = rows(db.execute(
         """select w.*, p.name as patient_name, p.uhid, p.phone from waitlist w join patients p on p.id = w.patient_id

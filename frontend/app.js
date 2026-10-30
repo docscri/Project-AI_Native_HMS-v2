@@ -59,7 +59,8 @@ async function api(path, opts = {}) {
   if (res.status === 401 && !opts.quiet && S.token) { endLocal(); throw new Error(data.detail || "Session ended. Log in again."); }
   if (!res.ok) {
     const d = data.detail;
-    throw new Error(Array.isArray(d) ? `Check ${String(d[0]?.loc?.slice(-1)[0] || "the form").replace(/_/g, " ")}.` : d || "Something went wrong.");
+    const err = new Error(Array.isArray(d) ? `Check ${String(d[0]?.loc?.slice(-1)[0] || "the form").replace(/_/g, " ")}.` : d || "Something went wrong.");
+    err.status = res.status; throw err;
   }
   return data;
 }
@@ -455,7 +456,7 @@ function openArrive(v) {
     <div class="foot"><button class="btn" data-a="close">Back</button><button class="btn primary" data-a="arrive-paid">Send to Waiting</button></div>`);
 }
 function openRefund(v) {
-  const left = (v.amount_paid || 0) - (v.refund_amount || 0);
+  const left = v.refundable || 0;
   M = { kind: "refund", v, reason: "" };
   modal(`<h2>Refund · ${esc(v.patient_name)}</h2>
     <label class="field">Amount (₹)<input type="number" min="1" max="${left}" id="rf-amt" value="${left}"></label>
@@ -614,6 +615,7 @@ async function viewConsult(visitId, doctorParam, patientParam) {
     const profile = pid && S.me.screens.includes("patients") ? await api(`/patients/${pid}`) : null;
     const found = S.cq.trim() ? await api(`/patients?q=${encodeURIComponent(S.cq)}`) : [];
     if (stale(g)) return;
+    if (cur) { S.textRev = S.textRev || {}; S.textRev[cur.id] = Math.max(S.textRev[cur.id] ?? 0, cur.text_rev ?? 0); }
     S.data = { today, cur, profile, found, doctorId, pid };
     renderConsult();
     if (cur && cur.status === "with_doctor" && !cur.brief && !S.briefing) {
@@ -882,14 +884,37 @@ function putSpeech(el, text, final) {
 }
 const paragraphs = text => { const out = []; let at = 0; for (const line of text.split("\n")) { if (line.trim()) out.push({ text: line.trim(), from: at, to: at + line.length }); at += line.length + 1; } return out; };
 function scheduleSave(visitId) { clearTimeout(S.ftT); S.ftT = setTimeout(() => saveText(visitId), 700); }
-async function saveText(visitId, ft = S.ft) {
+// Saves for one visit run one after another, each based on the last saved version (rev).
+// A retry of an older snapshot is dropped once newer text exists, and the server refuses out-of-date versions.
+function saveText(visitId, ft = S.ft) {
   clearTimeout(S.ftT);
-  if (!ft || ft.id !== visitId || ft.saved === ft.text) return;
+  S.saving = S.saving || {};
+  const run = (S.saving[visitId] || Promise.resolve()).then(() => saveOnce(visitId, ft));
+  S.saving[visitId] = run.catch(() => {});
+  return run;
+}
+async function saveOnce(visitId, ft, again) {
+  const newest = S.ft?.id === visitId ? S.ft : ft;
+  if (newest !== ft && newest.text !== ft.text) { S.failed?.delete(ft); return true; }   // newer text will save itself
+  if (!ft || ft.id !== visitId || ft.saved === ft.text) return true;
   const text = ft.text;
+  S.textRev = S.textRev || {}; S.sent = S.sent || {};
+  (S.sent[visitId] = S.sent[visitId] || new Set()).add(text);
   try {
-    await api(`/visits/${visitId}/text`, { method: "PUT", body: { text } });
+    const r = await api(`/visits/${visitId}/text`, { method: "PUT", body: { text, rev: S.textRev[visitId] ?? null } });
+    S.textRev[visitId] = r.rev;
   } catch (e) {
-    // Not saved: keep it marked unsaved, tell the doctor, and try again shortly.
+    if (e.status === 409 && !again) {
+      // Maybe our own earlier save reached the server but its reply was lost: if the server holds text this tab sent,
+      // continue from that version; otherwise someone else saved newer text and theirs is kept.
+      const now = await api(`/visits/${visitId}`).catch(() => null);
+      if (now && S.sent[visitId].has(now.text)) { S.textRev[visitId] = now.text_rev; return saveOnce(visitId, ft, true); }
+    }
+    if (e.status === 409) {
+      // Someone saved newer text (another tab or device): show theirs rather than overwrite it.
+      S.failed?.delete(ft); if (S.ft?.id === visitId) S.ft = null;
+      toast(e.message, true); refreshConsult(); return false;
+    }
     toast(`Not saved · ${e.message}`, true);
     S.failed = S.failed || new Set(); S.failed.add(ft);
     ft.tries = (ft.tries || 0) + 1;
@@ -897,6 +922,7 @@ async function saveText(visitId, ft = S.ft) {
     return false;
   }
   ft.saved = text; ft.tries = 0; S.failed?.delete(ft);
+  if (S.ft?.id === visitId && S.ft.text === text) S.ft.saved = text;
   if (S.data?.cur?.id === visitId) S.data.cur.text = text;
   return true;
 }
@@ -1189,7 +1215,7 @@ document.addEventListener("click", e => {
       case "receipt": openReceipt(v); break;
       case "v-more": { const vis = Object.values(D.columns).flat().find(x => x.id === Number(v)); M = { kind: "more" };
         modal(`<h2>${esc(vis.patient_name)}</h2><div class="more-list">${vis.paid_at ? `<button class="btn" data-a="receipt" data-v="${v}">Receipt</button>` : ""}
-          ${(vis.amount_paid || 0) > (vis.refund_amount || 0) ? `<button class="btn" data-a="refund" data-v="${v}">Refund</button>` : ""}
+          ${(vis.refundable || 0) > 0 ? `<button class="btn" data-a="refund" data-v="${v}">Refund</button>` : ""}
           ${vis.status === "waiting" && !vis.is_walk_in ? `<button class="btn" data-a="undo-arrival" data-v="${v}">Undo arrival</button>` : ""}
           ${vis.status === "booked" ? `<button class="btn" data-a="upload" data-v="${v}">Add document</button><button class="btn danger" data-a="cancel" data-v="${v}">Cancel booking</button>` : ""}</div>
           <div class="foot"><button class="btn" data-a="close">Back</button></div>`); break; }

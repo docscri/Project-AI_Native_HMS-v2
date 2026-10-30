@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from .. import ai, printpage, storage
 from ..auth import current_member, member_for_token, public_member, require_any, require_screen
 from ..db import connect, get_db, log_event, now, row, rows
+from ..rules import clinic_doctor, valid_day
 from .clinic import clinic_of
 from .operations import get_visit, move, visit_rows
 
@@ -33,8 +34,7 @@ def load_docs(db, patient_id: int) -> list[dict]:
 
 
 def load_note(db, visit_id: int) -> dict | None:
-    n = row(db.execute("""select n.*, s.name as signed_by_name from notes n left join members s on s.id = n.signed_by
-                           where n.visit_id = ?""", (visit_id,)).fetchone())
+    n = row(db.execute("select * from notes where visit_id = ?", (visit_id,)).fetchone())
     if n:
         n["content"] = json.loads(n["content"])
         n["citations"] = json.loads(n["citations"])
@@ -66,6 +66,7 @@ def today(doctor_id: int | None = None, me=Depends(doctor_screen), db=Depends(ge
     did = doctor_id or (me["id"] if me["kind"] == "doctor" else None)
     if not did:
         raise HTTPException(422, "Choose a doctor.")
+    clinic_doctor(db, me, did)
     vs = visit_rows(db, me, "v.doctor_id = ? and v.date = ? and v.status in ('waiting', 'with_doctor', 'done')",
                     (did, Date.today().isoformat()))
     return {"doctor_id": did, "visits": vs}
@@ -74,6 +75,7 @@ def today(doctor_id: int | None = None, me=Depends(doctor_screen), db=Depends(ge
 @router.post("/consultation/next")
 def call_next(doctor_id: int | None = None, me=Depends(doctor_screen), db=Depends(get_db)):
     did = doctor_id or me["id"]
+    clinic_doctor(db, me, did)
     if db.execute("select 1 from visits where doctor_id = ? and date = ? and status = 'with_doctor'",
                   (did, Date.today().isoformat())).fetchone():
         raise HTTPException(409, "Finish the current patient first.")
@@ -102,6 +104,7 @@ def workspace(visit_id: int, me=Depends(require_any("consultation", "patients"))
     out = visit_rows(db, me, "v.id = ?", (visit_id,))[0]
     out["age"] = age(out["dob"])
     out["text"] = text_of(v)
+    out["text_rev"] = v["dictation_rev"]
     out["brief"] = json.loads(v["brief"]) if v["brief"] else None
     out["documents"] = load_docs(db, v["patient_id"])
     out["note"] = load_note(db, visit_id)
@@ -131,6 +134,7 @@ def text_of(v: dict) -> str:
 
 class FreeText(BaseModel):
     text: str = Field(max_length=100_000)
+    rev: int | None = None   # the version this text was based on; older saves are refused
 
 
 def editable(db, v: dict) -> None:
@@ -146,8 +150,13 @@ def save_text(visit_id: int, body: FreeText, me=Depends(doctor_screen), db=Depen
     """The one writing space: typed and dictated text together, saved as the doctor works."""
     v = get_visit(db, me, visit_id)
     editable(db, v)
-    db.execute("update visits set dictation = ? where id = ?", (body.text, visit_id))
-    return {"ok": True, "length": len(body.text)}
+    if body.rev is None:
+        db.execute("update visits set dictation = ?, dictation_rev = dictation_rev + 1 where id = ?", (body.text, visit_id))
+    elif db.execute("update visits set dictation = ?, dictation_rev = dictation_rev + 1 where id = ? and dictation_rev = ?",
+                    (body.text, visit_id, body.rev)).rowcount != 1:
+        raise HTTPException(409, "Newer text was saved. Reloaded.")
+    rev = db.execute("select dictation_rev from visits where id = ?", (visit_id,)).fetchone()[0]
+    return {"ok": True, "length": len(body.text), "rev": rev}
 
 
 class Segment(BaseModel):
@@ -161,7 +170,7 @@ def add_segment(visit_id: int, body: Segment, me=Depends(doctor_screen), db=Depe
     v = get_visit(db, me, visit_id)
     editable(db, v)
     text = (text_of(v).rstrip() + "\n" + body.text.strip()).strip()
-    db.execute("update visits set dictation = ? where id = ?", (text, visit_id))
+    db.execute("update visits set dictation = ?, dictation_rev = dictation_rev + 1 where id = ?", (text, visit_id))
     return {"text": text}
 
 
@@ -270,6 +279,7 @@ def follow_up(visit_id: int, body: FollowUp, me=Depends(doctor_screen), db=Depen
     """Book the same patient with the same doctor on a later day. If that day is full, they join the waitlist."""
     from .operations import add_to_waitlist, create_booking
     v = get_visit(db, me, visit_id)
+    body.date = valid_day(body.date)
     if body.date <= Date.today().isoformat() or body.date <= v["date"]:
         raise HTTPException(422, "Pick a later date.")
     db.lock(f"tokens:{v['doctor_id']}:{body.date}")
@@ -307,8 +317,8 @@ def sign(note_id: int, me=Depends(doctor_screen), db=Depends(get_db)):
         raise HTTPException(403, "Only a doctor can sign.")
     ts = now()
     # The status check is part of the write, so a save or a second signature racing this one can't slip through.
-    if db.execute("update notes set status = 'signed', signed_at = ?, signed_by = ? where id = ? and status = 'draft'",
-                  (ts, me["id"], note_id)).rowcount != 1:
+    if db.execute("update notes set status = 'signed', signed_at = ?, signed_by = ?, signed_by_name = ? where id = ? and status = 'draft'",
+                  (ts, me["id"], me["name"], note_id)).rowcount != 1:
         raise HTTPException(409, "Already signed.")
     v = get_visit(db, me, n["visit_id"])
     if v["status"] == "with_doctor":
@@ -332,7 +342,7 @@ def print_note(note_id: int, token: str, auto: int = 0, db=Depends(get_db)):
     v = row(db.execute("select * from visits where id = ?", (n["visit_id"],)).fetchone())
     p = row(db.execute("select * from patients where id = ?", (n["patient_id"],)).fetchone())
     d = row(db.execute("select name, speciality from members where id = ?", (n["doctor_id"],)).fetchone())
-    signer = row(db.execute("select name from members where id = ?", (n["signed_by"],)).fetchone()) if n["signed_by"] else None
+
     content, e = json.loads(n["content"]), html.escape
     labels = {"S": "Subjective", "O": "Objective", "A": "Assessment", "P": "Plan"}
     soap = "".join(f'<div class="sec"><b class="tile">{k}</b><div><small>{labels[k]}</small><p>{e(t)}</p></div></div>'
@@ -343,7 +353,7 @@ def print_note(note_id: int, token: str, auto: int = 0, db=Depends(get_db)):
         for r in rx) + "</table>") if rx else ""
     sex = {"M": "Male", "F": "Female", "O": "Other"}.get(p["sex"] or "", "")
     who = " · ".join(x for x in [f"{age(p['dob'])} yrs" if p["dob"] else "", sex, p["uhid"]] if x)
-    signed = f"Signed by {e((signer or d)['name'])} · {printpage.stamp(n['signed_at'])}" if n["signed_at"] else "Draft · not signed"
+    signed = f"Signed by {e(n['signed_by_name'] or d['name'])} · {printpage.stamp(n['signed_at'])}" if n["signed_at"] else "Draft · not signed"
     body = f"""<header><div><h1>{e(c['name'])}</h1><small>{e(' · '.join(x for x in [c['address'], c['phone']] if x))}</small></div>
 <div class="r"><b>{e(p['name'])}</b><small>{e(who)}</small><small><span class="lime">{printpage.day(v['date'])}</span> · {e(d['name'])}{' · ' + e(d['speciality']) if d['speciality'] else ''}</small></div></header>
 <div class="secs">{soap or '<p>—</p>'}</div>{rx_html}

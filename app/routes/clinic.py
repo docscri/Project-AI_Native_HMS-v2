@@ -12,7 +12,7 @@ from ..auth import (INVITE_DAYS, LOCK_MINUTES, MAX_FAILED_LOGINS, RESET_HOURS, S
                     current_member, end_sessions, hash_password, later, new_code, public_member, require_admin, token_hash,
                     validate_password)
 from ..db import get_db, log_event, now, row, rows
-from ..rules import limits, parse_sessions, validate_sessions
+from ..rules import limits, parse_sessions, valid_day, validate_sessions
 
 router = APIRouter(prefix="/api")
 
@@ -421,7 +421,7 @@ class MemberUpdate(BaseModel):
     screens: list[str] | None = None
     is_admin: bool | None = None
     status: str | None = Field(default=None, pattern="^(active|inactive)$")
-    joined_on: str | None = None
+    joined_on: str | None = Field(default=None, pattern=r"^(\d{4}-\d{2}-\d{2})?$")
     emergency_contact: str | None = None
     address: str | None = None
     id_number: str | None = None
@@ -449,6 +449,10 @@ def update_member(member_id: int, body: MemberUpdate, me=Depends(require_admin),
             "select 1 from visits where doctor_id = ?", (member_id,)).fetchone():
         raise HTTPException(409, "Doctor has visits. Can't change.")
     changes = body.model_dump(exclude_none=True, exclude={"clear_fee"})
+    if changes.get("joined_on"):
+        changes["joined_on"] = valid_day(changes["joined_on"])
+    elif "joined_on" in changes:
+        changes["joined_on"] = None
     if not m["is_owner"] and ("screens" in changes or "is_admin" in changes or "kind" in changes):
         cur = json.loads(m["screens"]) if "screens" not in changes else changes["screens"]
         changes["screens"] = json.dumps(allowed_screens(cur, changes.get("kind", m["kind"]), changes.get("is_admin", bool(m["is_admin"]))))
@@ -478,8 +482,8 @@ def remove_member(member_id: int, me=Depends(require_admin), db=Depends(get_db))
         raise HTTPException(404, "Member not found.")
     if m["is_owner"]:
         raise HTTPException(409, "The owner cannot be removed.")
-    used = db.execute("select 1 from visits where doctor_id = ? union select 1 from notes where doctor_id = ?",
-                      (member_id, member_id)).fetchone()
+    used = db.execute("""select 1 from visits where doctor_id = ? union select 1 from notes where doctor_id = ?
+                         union select 1 from notes where signed_by = ?""", (member_id, member_id, member_id)).fetchone()
     if used:
         db.execute("update members set status = 'inactive' where id = ?", (member_id,))
         end_sessions(db, member_id)
