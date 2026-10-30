@@ -51,14 +51,19 @@ def test_brief_without_ai(monkeypatch):
         assert [e["text"] for e in b["events"]] == ["Follow-up for blood pressure. Hypertension, improving.",
                                                    "Follow-up for diabetes. Type 2 diabetes, fair control."]
         charts = {ch["test"]: ch for ch in b["charts"]}
-        bp = {s["name"]: [p["value"] for p in s["points"]] for s in charts["BP"]["series"]}
-        assert bp == {"Systolic": [150, 138], "Diastolic": [90, 86]}
+        bp = {s["name"]: [(p["value"], p["out"]) for p in s["points"]] for s in charts["BP"]["series"]}
+        assert bp == {"Systolic": [(150, True), (138, False)], "Diastolic": [(90, True), (86, False)]}
+        assert b["charts"][0]["series"][0]["points"][-1]["date"] >= b["charts"][-1]["series"][0]["points"][-1]["date"]   # latest first
         assert charts["HbA1c"]["series"][0]["points"][0]["cite"] == f"D{d['id']}"
         assert charts["Weight"]["series"][0]["points"][0]["cite"] == f"N{n1['id']}.O"
-        # reused until something changes; a new report makes it stale
+        # reused until something changes; a new report is read and the brief rebuilt in the background
         assert c.get(f"/api/visits/{today['id']}", headers=h).json()["brief"]["basis"] == b["basis"]
-        upload(c, h, today["id"], "Fasting glucose: 168 mg/dL")
-        assert c.get(f"/api/visits/{today['id']}", headers=h).json()["brief"] is None
+        d2 = upload(c, h, today["id"], "Sunrise Diagnostics\nFasting glucose: 168 mg/dL")
+        again = c.get(f"/api/visits/{today['id']}", headers=h).json()["brief"]
+        assert again["basis"] != b["basis"] and f"D{d2['id']}" in again["sources"]
+        assert again["sources"][f"D{d2['id']}"]["label"] == "Sunrise Diagnostics"
+        flagged = [f for s in again["summary"][0]["sentences"] for f in s["flags"]]
+        assert "168" in flagged and "8.9" in flagged and "1.0" not in flagged     # high sugar and HbA1c marked, normal creatinine not
 
 
 def test_ai_sentences_without_valid_citations_are_dropped(monkeypatch):
@@ -89,4 +94,28 @@ def test_report_beats_note_on_the_same_day():
     notes = [{"id": 1, "date": "2026-10-20", "vals": json.dumps([{"test": "HbA1c", "value": "7.0", "unit": "%", "section": "O"}])}]
     docs = [{"id": 5, "created_at": "2026-10-20T09:00:00", "extracted": {"findings": [{"name": "Glycated Hb", "value": "7.2", "unit": "%"}]}}]
     out = brief.charts(notes, docs, None)
-    assert out == [{"test": "HbA1c", "unit": "%", "series": [{"name": "HbA1c", "points": [{"date": "2026-10-20", "value": 7.2, "cite": "D5"}]}]}]
+    assert out == [{"test": "HbA1c", "unit": "%", "series": [{"name": "HbA1c", "range": [4.0, 5.6],
+                                                              "points": [{"date": "2026-10-20", "value": 7.2, "text": "7.2", "cite": "D5", "out": True}]}]}]
+
+
+def test_repeated_assessments_become_one_line(monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    with TestClient(app) as c:
+        h, doc, pid, n1, n2 = setup(c, "b3@x.in")
+        v3, n3 = signed_visit(c, h, doc, pid, {"S": "BP review.", "O": "BP 136/84.", "A": "Hypertension, improving.", "P": "Continue."})
+        db = connect()
+        db.execute("update visits set date = '2026-10-25' where id = ?", (v3["id"],))
+        db.commit(); db.close()
+        today = c.post("/api/visits/walk-in", headers=h, json={"patient_id": pid, "doctor_id": doc, "payment_method": "cash"}).json()
+        b = c.post(f"/api/visits/{today['id']}/brief", headers=h).json()
+        lines = b["summary"][-1]["sentences"]
+        htn = [s for s in lines if s["text"].startswith("Hypertension, improving")]
+        assert len(htn) == 1 and htn[0]["cites"] == [f"N{n3['id']}.A", f"N{n2['id']}.A"]
+
+
+def test_brief_is_ready_when_the_patient_arrives(monkeypatch):
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    with TestClient(app) as c:
+        h, doc, pid, n1, n2 = setup(c, "b4@x.in")
+        today = c.post("/api/visits/walk-in", headers=h, json={"patient_id": pid, "doctor_id": doc, "payment_method": "cash"}).json()
+        assert c.get(f"/api/visits/{today['id']}", headers=h).json()["brief"]["events"]     # built in the background, no click needed

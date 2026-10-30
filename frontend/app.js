@@ -633,7 +633,7 @@ function renderConsult() {
   const fe = $("#free-text"); if (fe && S.ft?.id === Number(fe.dataset.v)) { S.ft.sel = document.activeElement === fe ? fe.selectionEnd : null; S.ft.scroll = fe.scrollTop; }
   if (S.ft && S.ft.id !== v?.id) { saveText(S.ft.id, S.ft); S.ft = null; }
   if (!S.ft && v && S.drafts?.[v.id] && S.drafts[v.id].saved !== S.drafts[v.id].text) S.ft = S.drafts[v.id];   // restore unsaved text
-  if (S.noteVisit !== v?.id) { S.noteVisit = v?.id; S.noteEdit = false; }
+  if (S.noteVisit !== v?.id) { S.noteVisit = v?.id; S.noteEdit = false; S.allEvents = false; }
   const floatMic = v && (["waiting", "with_doctor"].includes(v.status) || S.recState) && S.ctab !== "note";
   $("#root").innerHTML = `<div class="cx">
     <header class="cx-top">
@@ -724,31 +724,49 @@ function center() {
 function paneBrief(v) {
   const b = v.brief, tab = S.btab || "summary";
   if (!b?.summary) return `<p class="muted cx-lead">${["waiting", "with_doctor"].includes(v.status) ? "Preparing brief…" : "—"}</p>`;
-  if (tab === "events") return b.events.length ? `<div class="timeline">${b.events.map(e => `<div class="tl"><div class="tl-head"><b>${longDate(e.date)}</b><span>${esc(e.doctor)}</span>${pill("done")}</div>
-      <div class="items"><button class="btn small" data-a="note-view" data-v="${e.visit_id}">Note & prescription</button>${e.documents.map(d => `<button class="btn small" data-a="open-doc" data-v="${d.id}">📄 ${esc(d.filename)}</button>`).join("")}</div>
-      <div class="muted" style="font-size:13.5px;margin-top:6px">${esc(e.text)}</div></div>`).join("")}</div>` : `<p class="muted cx-lead">First visit.</p>`;
-  if (tab === "charts") return b.charts.length ? `<div class="bchart-grid">${b.charts.map(chartCard).join("")}</div>` : `<p class="muted cx-lead">No values yet.</p>`;
+  if (tab === "events") {
+    if (!b.events.length) return `<p class="muted cx-lead">First visit.</p>`;
+    const shown = S.allEvents ? b.events : b.events.slice(0, 5);
+    return `<div class="timeline">${shown.map(e => `<div class="tl"><div class="tl-head"><b>${longDate(e.date)}</b><span>${esc(e.doctor)}</span></div>
+      <div class="items"><button class="btn small" data-a="note-view" data-v="${e.visit_id}">Note & prescription</button>${e.documents.map(d => `<button class="btn small" data-a="open-doc" data-v="${d.id}">📄 ${esc(docTitle(d))}</button>`).join("")}</div>
+      <div class="muted" style="font-size:13.5px;margin-top:6px">${esc(e.text)}</div></div>`).join("")}</div>
+      ${b.events.length > 5 ? `<div><button class="btn small" data-a="cs-allev">${S.allEvents ? "Show fewer" : `Show all ${b.events.length}`}</button></div>` : ""}`;
+  }
+  if (tab === "charts") {   // single readings as compact tiles first, then trends; each group latest first
+    if (!b.charts.length) return `<p class="muted cx-lead">No values yet.</p>`;
+    const one = c => c.series.every(ser => ser.points.length === 1), tiles = b.charts.filter(one), trends = b.charts.filter(c => !one(c));
+    return `${tiles.length ? `<div class="bchart-tiles">${tiles.map(chartCard).join("")}</div>` : ""}${trends.length ? `<div class="bchart-grid">${trends.map(chartCard).join("")}</div>` : ""}`;
+  }
   const paras = b.summary.filter(p => p.sentences.length);
-  return paras.length ? paras.map(p => `<p class="cx-lead">${p.sentences.map(x => esc(x.text) + citeBtns(x.cites)).join(" ")}</p>`).join("") : `<p class="muted cx-lead">First visit.</p>`;
+  return paras.length ? paras.map(p => `<p class="cx-lead">${p.sentences.map(x => flagged(x.text, x.flags) + citeBtns(x.cites)).join(" ")}</p>`).join("") : `<p class="muted cx-lead">First visit.</p>`;
 }
 const num = x => String(+x);
+const shown = p => p.text ?? num(p.value);   // the value as written (1.0 stays 1.0)
+const docTitle = d => d.title || d.extracted?.title || d.filename.replace(/\.[^.]+$/, "");
+// Values outside the usual range, marked inside the sentence.
+const flagged = (text, flags) => (flags || []).reduce((h, f) => h.split(esc(f)).join(`<mark class="abn">${esc(f)}</mark>`), esc(text));
 const monYr = d => new Date(d).toLocaleDateString("en-IN", { month: "short", year: "2-digit" });
 // One test over time. Two lines only for BP (systolic, diastolic): blue and deep coral, validated against the card.
 function chartCard(c) {
+  const last = c.series.map(ser => ser.points.at(-1)), out = last.some(p => p.out);
+  const head = `<div class="bchart-head"><b>${esc(c.test)}</b><span class="${out ? "abn" : ""}">${last.map(shown).join("/")}${c.unit ? " " + esc(c.unit) : ""}</span></div>`;
+  if (c.series.every(ser => ser.points.length === 1))   // one reading isn't a trend: a value tile
+    return `<button class="bchart bchart-one" data-a="cite" data-v="${last[0].cite}">${head}<span class="bchart-when">${longDate(last[0].date)}</span></button>`;
   const W = 320, H = 130, L = 34, R = 12, T = 12, B = 22, pts = c.series.flatMap(x => x.points);
+  const band = c.series.length === 1 ? c.series[0].range : null;
   const ms = d => new Date(d).getTime(), t0 = Math.min(...pts.map(p => ms(p.date))), t1 = Math.max(...pts.map(p => ms(p.date)));
-  let lo = Math.min(...pts.map(p => p.value)), hi = Math.max(...pts.map(p => p.value));
-  const pad = (hi - lo || Math.abs(hi) || 1) * 0.2; lo -= pad; hi += pad;
+  let lo = Math.min(...pts.map(p => p.value), ...(band || [])), hi = Math.max(...pts.map(p => p.value), ...(band || []));
+  const pad = (hi - lo || Math.abs(hi) || 1) * 0.15; lo -= pad; hi += pad;
   const x = d => t1 === t0 ? (L + W - R) / 2 : L + (ms(d) - t0) / (t1 - t0) * (W - L - R);
   const y = val => T + (hi - val) / (hi - lo) * (H - T - B);
   const colors = c.series.length > 1 ? ["#2a78d6", "#D9542F"] : ["var(--ink)"];
   const lines = c.series.map((ser, i) => `${ser.points.length > 1 ? `<path d="${ser.points.map((p, j) => `${j ? "L" : "M"}${x(p.date).toFixed(1)},${y(p.value).toFixed(1)}`).join("")}" fill="none" stroke="${colors[i]}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>` : ""}
-    ${ser.points.map(p => `<g class="bpt" data-a="cite" data-v="${p.cite}" tabindex="0" role="button" aria-label="${esc(ser.name)} ${num(p.value)} ${esc(c.unit)}, ${longDate(p.date)}"><circle cx="${x(p.date)}" cy="${y(p.value)}" r="12" fill="transparent"/><circle cx="${x(p.date)}" cy="${y(p.value)}" r="4" fill="${colors[i]}" stroke="var(--surface)" stroke-width="2"/>
-      <text class="bpt-tip" x="${Math.min(Math.max(x(p.date), L + 24), W - R - 24)}" y="${Math.max(y(p.value) - 10, 10)}" text-anchor="middle">${num(p.value)} · ${monYr(p.date)}</text></g>`).join("")}`).join("");
-  const latest = c.series.map(ser => num(ser.points.at(-1).value)).join("/");
-  return `<div class="bchart"><div class="bchart-head"><b>${esc(c.test)}</b><span>${latest}${c.unit ? " " + esc(c.unit) : ""}</span></div>
+    ${ser.points.map(p => `<g class="bpt" data-a="cite" data-v="${p.cite}" tabindex="0" role="button" aria-label="${esc(ser.name)} ${shown(p)} ${esc(c.unit)}, ${longDate(p.date)}${p.out ? ", outside usual range" : ""}"><circle cx="${x(p.date)}" cy="${y(p.value)}" r="12" fill="transparent"/><circle cx="${x(p.date)}" cy="${y(p.value)}" r="4" fill="${c.series.length === 1 && p.out ? "#D9542F" : colors[i]}" stroke="${p.out ? (c.series.length === 1 ? "#D9542F" : "var(--ink)") : "var(--surface)"}" stroke-width="2"/>
+      <text class="bpt-tip" x="${Math.min(Math.max(x(p.date), L + 24), W - R - 24)}" y="${Math.max(y(p.value) - 10, 10)}" text-anchor="middle">${shown(p)} · ${monYr(p.date)}</text></g>`).join("")}`).join("");
+  return `<div class="bchart">${head}
     ${c.series.length > 1 ? `<div class="bchart-legend">${c.series.map((ser, i) => `<span><i style="background:${colors[i]}"></i>${esc(ser.name)}</span>`).join("")}</div>` : ""}
     <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(c.test)} over time">
+      ${band ? `<rect x="${L}" y="${y(band[1])}" width="${W - L - R}" height="${y(band[0]) - y(band[1])}" class="bchart-band"><title>Usual range ${num(band[0])}–${num(band[1])}</title></rect>` : ""}
       <line x1="${L}" y1="${H - B}" x2="${W - R}" y2="${H - B}" class="bchart-axis"/>
       <text x="${L - 6}" y="${y(hi - pad) + 4}" text-anchor="end" class="bchart-tick">${num(+(hi - pad).toFixed(1))}</text>
       <text x="${L - 6}" y="${y(lo + pad) + 4}" text-anchor="end" class="bchart-tick">${num(+(lo + pad).toFixed(1))}</text>
@@ -828,7 +846,7 @@ function rightCol() {
 function sourceOf(v, id) {
   if (id.startsWith("T")) { const t = v.note?.sources?.[id] ?? sentences(freeText(v))[Number(id.slice(1)) - 1]?.text; return t && { kind: "Transcript", text: t }; }
   const bs = v.brief?.sources?.[id];
-  if (bs) return bs.kind === "note" ? { kind: `Note · ${longDate(bs.date)} · ${bs.section}`, text: bs.body } : { kind: `Report · ${longDate(bs.date)}`, text: bs.filename + (bs.summary ? " — " + bs.summary : "") };
+  if (bs) return bs.kind === "note" ? { kind: `Note · ${longDate(bs.date)} · ${bs.section}`, text: bs.body } : { kind: `Report · ${longDate(bs.date)}`, text: bs.label + (bs.summary ? " — " + bs.summary : "") };
   if (id.startsWith("D")) { const d = v.documents.find(x => "D" + x.id === id); return d && { kind: "Document", text: d.filename + (d.extracted?.findings?.length ? " — " + d.extracted.findings.slice(0, 3).map(f => `${f.name} ${f.value} ${f.unit || ""}`.trim()).join(", ") : "") }; }
   if (id.startsWith("N")) return { kind: "Earlier note", text: "Signed note from a previous visit" };
   return null;
@@ -839,11 +857,15 @@ function citations(v) {
   const groups = [], cites = v.note?.citations || {}, b = v.brief;
   ["S", "O", "A", "P"].forEach(k => { if (cites[k]?.length) groups.push([k, cites[k]]); });
   const briefIds = [...new Set([...(b?.summary || []).flatMap(p => p.sentences.flatMap(x => x.cites)), ...(b?.charts || []).flatMap(c => c.series.flatMap(x => x.points.map(p => p.cite)))])];
-  if (briefIds.length) groups.push(["B", briefIds]);
+  const docIcon = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-label="Reports"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>`;
+  const noteIcon = `<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-label="Notes"><path d="M5 6h14M5 12h14M5 18h9"/></svg>`;
+  const reps = briefIds.filter(id => b.sources[id]?.kind === "document"), notes = briefIds.filter(id => !reps.includes(id));
+  if (reps.length) groups.push([docIcon, reps]);
+  if (notes.length) groups.push([noteIcon, notes]);
   if (!groups.length) return `<div class="cx-empty">No sources</div>`;
   const card = id => {
     const bs = b?.sources?.[id], on = S.focusSrc === id ? " hl" : "";
-    if (bs?.kind === "document") return `<div class="src-doc${on}" id="src-${id}"><small>REPORT · ${longDate(bs.date).toUpperCase()}</small><b>${esc(bs.filename)}</b>${bs.summary ? `<span>${esc(bs.summary)}</span>` : ""}
+    if (bs?.kind === "document") return `<div class="src-doc${on}" id="src-${id}"><small>REPORT · ${longDate(bs.date).toUpperCase()}</small><b>${esc(bs.label)}</b>${bs.summary ? `<span>${esc(bs.summary)}</span>` : ""}
       ${bs.findings.length ? `<span class="src-vals">${bs.findings.map(f => esc(`${f.name} ${f.value} ${f.unit || ""}`.trim())).join(" · ")}</span>` : ""}<button class="btn small" data-a="open-doc" data-v="${bs.doc_id}">Open file</button></div>`;
     if (bs?.kind === "note") return `<button class="${on.trim()}" id="src-${id}" data-a="note-view" data-v="${bs.visit_id}"><small>NOTE · ${longDate(bs.date).toUpperCase()} · ${bs.section.toUpperCase()}</small>${esc(bs.body)}<em>${esc(bs.doctor)}</em></button>`;
     const src = sourceOf(v, id); return src ? `<button data-a="cite" data-v="${id}"><small>${src.kind.toUpperCase()} · ${id}</small>${esc(src.text)}</button>` : "";
@@ -851,7 +873,7 @@ function citations(v) {
   return `<div class="cite-list">${groups.map(([k, ids]) => `<div class="cite-item"><b>${k}</b><div class="cite-src">${ids.map(card).join("")}</div></div>`).join("")}</div>`;
 }
 const fmtClock = ms => { const t = Math.floor(ms / 1000); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`; };
-const citeLabel = id => { const bs = S.data?.cur?.brief?.sources?.[id]; return !bs ? id : bs.kind === "note" ? `${new Date(bs.date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })} · ${bs.section[0]}` : "Report"; };
+const citeLabel = id => { const bs = S.data?.cur?.brief?.sources?.[id]; return !bs ? id : bs.kind === "note" ? new Date(bs.date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: new Date(bs.date).getFullYear() === new Date().getFullYear() ? undefined : "numeric" }) : "Report"; };
 function citeBtns(ids) { return (ids || []).map(c => `<button class="cite" data-a="cite" data-v="${c}">${esc(citeLabel(c))}</button>`).join(""); }
 function noteEditor(n, ro) {
   const soap = n.content.soap, rx = n.content.rx;
@@ -1088,7 +1110,7 @@ function profile(p) {
     <span class="label">Visit history</span>
     ${visits.length ? `<div class="timeline">${visits.map(v => `<div class="tl"><div class="tl-head"><b>${longDate(v.date)}</b><span>${esc(v.doctor)}</span>${pill(v.status)}</div>
       <div class="items">${v.note ? `<button class="btn small" data-a="note-view" data-v="${v.id}">${v.note.status === "signed" ? "Note & prescription" : "Draft note"}</button>` : ""}
-      ${v.documents.map(d => `<button class="btn small" data-a="open-doc" data-v="${d.id}">📄 ${esc(d.filename)}</button>`).join("")}</div>
+      ${v.documents.map(d => `<button class="btn small" data-a="open-doc" data-v="${d.id}">📄 ${esc(docTitle(d))}</button>`).join("")}</div>
       ${v.note?.soap?.A ? `<div class="muted" style="font-size:13.5px;margin-top:6px">${esc(v.note.soap.A)}</div>` : ""}</div>`).join("")}</div>` : `<div class="empty">—</div>`}
   </section>`;
 }
@@ -1410,6 +1432,7 @@ document.addEventListener("click", e => {
       case "cs-tab": await flushText(); if (D.cur?.note && $("#soap-S")) D.cur.note.content = readNote(); S.ctab = v; renderConsult(); break;
       case "cs-side": S.cside = v; renderConsult(); break;
       case "cs-btab": S.btab = v; renderConsult(); break;
+      case "cs-allev": S.allEvents = !S.allEvents; renderConsult(); break;
       case "cs-left": S.cleft = v; refreshConsult(); break;
       case "cs-patient": go(`#/consult?doctor=${D.doctorId}&patient=${v}`); break;
       case "cs-draft-go": if (!(await flushText(Number(v)))) break; await api(`/visits/${v}/note/draft`, { body: {} }); S.ctab = "note"; toast("Draft ready."); refreshConsult(); break;

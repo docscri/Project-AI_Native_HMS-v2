@@ -2,11 +2,11 @@
 import html
 from datetime import date as Date
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-from .. import printpage
+from .. import brief, printpage
 from ..auth import current_member, member_for_token, public_member, require_screen
 from ..db import get_db, log_event, now, row, rows
 from ..rules import (ACTIVE, availability, clinic_doctor, valid_day, day_schedule, doctor_fee, find_session, next_arrival_token, now_hhmm, require_bookable,
@@ -254,7 +254,7 @@ def create_booking(db, me, patient_id, doctor_id, day, session=None, wanted=None
 
 
 @router.post("/visits/walk-in")
-def walk_in(body: WalkIn, me=Depends(front_desk), db=Depends(get_db)):
+def walk_in(body: WalkIn, tasks: BackgroundTasks, me=Depends(front_desk), db=Depends(get_db)):
     today = Date.today().isoformat()
     clinic_doctor(db, me, body.doctor_id)
     db.lock(f"tokens:{body.doctor_id}:{today}")
@@ -273,11 +273,13 @@ def walk_in(body: WalkIn, me=Depends(front_desk), db=Depends(get_db)):
          token)).lastrowid
     ledger(db, me, vid, "payment", pay["amount_paid"], pay["payment_method"], pay["receipt_no"], at=pay["paid_at"])
     log_event(db, me["clinic_id"], me["id"], "visit", vid, "walk_in", {"token": token, "paid": pay["amount_paid"]})
+    db.commit()   # background tasks run before the request's own commit
+    tasks.add_task(brief.prebuild, vid)   # ready when the doctor opens the visit
     return visit_out(db, me, vid)
 
 
 @router.post("/visits/{visit_id}/arrive")
-def arrive(visit_id: int, body: Payment, me=Depends(front_desk), db=Depends(get_db)):
+def arrive(visit_id: int, body: Payment, tasks: BackgroundTasks, me=Depends(front_desk), db=Depends(get_db)):
     v = get_visit(db, me, visit_id)
     db.lock(f"tokens:{v['doctor_id']}:{v['date']}")
     v = get_visit(db, me, visit_id)
@@ -292,6 +294,8 @@ def arrive(visit_id: int, body: Payment, me=Depends(front_desk), db=Depends(get_
     pay = charge(db, me, v["fee"], body)
     move(db, me, v, "waiting", token=token, late=0, queue_order=token, **pay)
     ledger(db, me, visit_id, "payment", pay["amount_paid"], pay["payment_method"], pay["receipt_no"], at=pay["paid_at"])
+    db.commit()
+    tasks.add_task(brief.prebuild, visit_id)
     return visit_out(db, me, visit_id)
 
 

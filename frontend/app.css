@@ -1008,3 +1008,15 @@ table.members tr.click:hover td:first-child b { text-decoration-color: var(--ink
 .src-doc .btn.small { align-self: flex-start; margin-top: 4px; background: transparent; color: var(--frame-fg); border-color: var(--frame-line); }
 .cite-src .hl { background: var(--frame-2) !important; border-color: var(--lime) !important; }
 .cite-item .src-doc b { width: auto; height: auto; background: none; display: block; color: var(--frame-fg); font-size: 14px; border-radius: 0; }
+/* brief: values outside the usual range, range band, single-reading tile */
+mark.abn { background: none; color: #D9542F; font-weight: 700; }
+.bchart-head span.abn { color: #D9542F; }
+.bchart-band { fill: color-mix(in srgb, var(--lime) 30%, transparent); }
+.bchart-one { border: 0; text-align: left; cursor: pointer; font: inherit; color: inherit; padding: 14px 16px; justify-content: space-between; min-height: 92px; }
+.bchart-one .bchart-head span { font-size: 20px; color: var(--ink); }
+.bchart-one .bchart-head span.abn { color: #D9542F; }
+.bchart-when { font-size: 12px; font-weight: 600; color: var(--muted); }
+.bchart-one:hover { background: var(--tile-2); }
+.bchart-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 14px; }
+.bchart-tiles .bchart-one { min-height: 0; gap: 4px; }
+.bchart-tiles .bchart-head { flex-direction: column; align-items: flex-start; gap: 2px; }

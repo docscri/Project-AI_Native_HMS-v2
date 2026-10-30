@@ -182,6 +182,8 @@ def run_extraction(doc_id: int) -> None:
         db.commit()
     finally:
         db.close()
+    if d and d["visit_id"]:
+        brief.prebuild(d["visit_id"])   # a report brought at arrival appears in the brief
 
 
 @router.post("/visits/{visit_id}/documents")

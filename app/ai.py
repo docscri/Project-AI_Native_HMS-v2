@@ -35,9 +35,10 @@ def extract_document(data: bytes, mime: str, filename: str) -> dict:
     if enabled() and (mime or "").split("/")[0] in ("image", "application"):
         return _gemini([{"text": _prompt("extract.txt")}, {"inline_data": {"mime_type": mime, "data": base64.b64encode(data).decode()}}])
     text = data.decode(errors="ignore")[:4000] if (mime or "").startswith("text") else ""
+    head = next((x.strip() for x in text.splitlines() if x.strip()), "")
     findings = [{"name": n.strip(), "value": v, "unit": u.strip()}
                 for n, v, u in re.findall(r"([A-Za-z][A-Za-z0-9 ]{1,20})[:\s]+(\d+(?:\.\d+)?)\s*([a-zA-Z/%]*)", text)][:10]
-    return {"summary": text[:300] or f"Uploaded document: {filename}", "findings": findings}
+    return {"summary": text[:300] or f"Uploaded document: {filename}", "findings": findings, "title": head if 0 < len(head) <= 60 and not re.search(r"\d", head) else ""}
 
 
 
@@ -137,8 +138,14 @@ def brief_text(patient: dict, sources: dict, new_ids: list[str], visits: list[di
                          + "\n\nNEW DOCUMENTS: " + json.dumps(new_ids) + "\n\nVISITS: " + json.dumps([v["note"] for v in visits])
                          + "\n\nSOURCES:\n" + json.dumps(listing)}])
     first = lambda t: (sentences(t) or [""])[0]
-    new = [{"text": f"{sources[d]['label']}: {first(sources[d]['summary'])}", "cites": [d]} for d in new_ids]
-    history = [{"text": f"{v['date_text']}: {first(sources[v['note'] + '.A']['body'])}", "cites": [v["note"] + ".A"]}
-               for v in visits[:3] if v["note"] + ".A" in sources]
+    vals = lambda d: ", ".join(f'{f.get("name")} {f.get("value")} {f.get("unit") or ""}'.strip() for f in sources[d]["findings"][:6])
+    lead = lambda d: first(sources[d]["summary"]) if first(sources[d]["summary"]).lower().startswith(sources[d]["label"].lower()) else f"{sources[d]['label']}: {first(sources[d]['summary'])}"
+    new = [{"text": lead(d) + (f" {vals(d)}." if vals(d) else ""), "cites": [d]} for d in new_ids]
+    seen = {}   # one line per assessment, citing every visit it came from
+    for v in visits:
+        a = v["note"] + ".A"
+        if a in sources:
+            seen.setdefault(first(sources[a]["body"]), []).append((v["date_text"], a))
+    history = [{"text": t, "cites": [c for _, c in hits]} for t, hits in list(seen.items())[:4]]   # dates show on the citation chips
     return {"new": new, "history": history, "events": []}
 

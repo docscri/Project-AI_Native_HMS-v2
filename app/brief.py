@@ -1,10 +1,13 @@
 """Pre-visit brief: summary, visit events and charts. Every line cites a signed-note section or a document."""
 import json
+import logging
 import re
 from datetime import date
 
 from . import ai
-from .db import row, rows
+from .db import connect, now, row, rows
+
+log = logging.getLogger(__name__)
 
 SECTIONS = {"S": "Subjective", "O": "Objective", "A": "Assessment", "P": "Plan"}
 NUM = re.compile(r"\d+(?:\.\d+)?")
@@ -14,6 +17,38 @@ ALIASES = {"hba1c": "HbA1c", "glycatedhb": "HbA1c", "glycatedhaemoglobin": "HbA1
            "bp": "BP", "bloodpressure": "BP", "temp": "Temperature", "temperature": "Temperature", "spo2": "SpO2",
            "pulse": "Pulse", "hr": "Pulse", "heartrate": "Pulse", "weight": "Weight", "wt": "Weight",
            "creatinine": "Creatinine", "serumcreatinine": "Creatinine"}
+
+
+# Usual adult ranges, used only to mark values; a value is marked only when its unit matches.
+RANGES = {"HbA1c": (4.0, 5.6, "%"), "Fasting sugar": (70, 99, "mg/dl"), "Random sugar": (70, 139, "mg/dl"),
+          "Creatinine": (0.6, 1.3, "mg/dl"), "BP systolic": (90, 139, "mmhg"), "BP diastolic": (60, 89, "mmhg"),
+          "Pulse": (60, 100, "/min"), "SpO2": (95, 100, "%"), "Temperature": (97, 99.5, "°f")}
+
+
+def name_of(test) -> str:
+    return ALIASES.get(re.sub(r"[^a-z0-9]", "", str(test).lower()), str(test).strip())
+
+
+def outside(name: str, unit: str, value) -> bool:
+    r = RANGES.get(name)
+    try:
+        v = float(str(value).replace(",", ""))
+    except ValueError:
+        return False
+    return bool(r) and (unit or "").replace(" ", "").lower() in (r[2], "") and not r[0] <= v <= r[1]
+
+
+def abnormal_values(f: dict) -> list[str]:
+    """The value text(s) of a finding that sit outside the usual range."""
+    name, unit, value = name_of(f.get("name") or f.get("test")), f.get("unit") or "", str(f.get("value") or "").replace(" ", "")
+    if name == "BP" and "/" in value:
+        sys_, dia = value.split("/", 1)
+        return [value] if outside("BP systolic", unit, sys_) or outside("BP diastolic", unit, dia) else []
+    return [value] if outside(name, unit, value) else []
+
+
+def title_of(d: dict) -> str:
+    return (d["extracted"] or {}).get("title") or d["filename"].rsplit(".", 1)[0]
 
 
 def nice(d: str) -> str:
@@ -54,8 +89,9 @@ def values_of(db, n: dict) -> list[dict]:
 
 
 def checked(items, sources: dict) -> list[dict]:
-    """Keeps a sentence only if it cites known sources and every number in it appears in them."""
-    out = []
+    """Keeps a sentence only if it cites known sources and every number in it appears in them.
+    Repeated sentences become one, citing every source; values outside the usual range are listed in "flags"."""
+    out, seen = [], {}
     for it in items if isinstance(items, list) else []:
         if not isinstance(it, dict):
             continue
@@ -64,17 +100,24 @@ def checked(items, sources: dict) -> list[dict]:
         if not text or not cites:
             continue
         have = set(NUM.findall(" ".join(sources[c]["text"] for c in cites)))
-        if all(x in have for x in NUM.findall(text)):
-            out.append({"text": text, "cites": cites})
+        if not all(x in have for x in NUM.findall(text)):
+            continue
+        key = re.sub(r"[^a-z0-9]", "", text.lower())
+        if key in seen:
+            seen[key]["cites"] += [c for c in cites if c not in seen[key]["cites"]]
+            continue
+        flags = [x for c in cites for f in sources[c].get("values", []) for x in abnormal_values(f) if x in text.replace(" ", "")]
+        seen[key] = {"text": text, "cites": cites, "flags": list(dict.fromkeys(flags))}
+        out.append(seen[key])
     return out
 
 
 def charts(notes: list[dict], docs: list[dict], db) -> list[dict]:
     points = {}   # (test, unit) -> {date: point}; a report beats a note on the same day
     def add(test, unit, value, day, cite, from_doc):
-        name = ALIASES.get(re.sub(r"[^a-z0-9]", "", str(test).lower()), str(test).strip())
+        name = name_of(test)
         unit = str(unit or "").strip()
-        value = str(value).replace(" ", "")
+        value = str(value).replace(" ", "").replace(",", "")
         if name == "BP" and "/" in value:
             sys_, dia = value.split("/", 1)
             add("BP systolic", unit or "mmHg", sys_, day, cite, from_doc)
@@ -84,7 +127,7 @@ def charts(notes: list[dict], docs: list[dict], db) -> list[dict]:
             return
         series = points.setdefault((name, unit), {})
         if from_doc or day not in series or not series[day]["doc"]:
-            series[day] = {"date": day, "value": float(value), "cite": cite, "doc": from_doc}
+            series[day] = {"date": day, "value": float(value), "text": value, "cite": cite, "doc": from_doc}
     for d in docs:
         for f in d["extracted"].get("findings") or []:
             add(f.get("name"), f.get("unit"), f.get("value"), (f.get("date") or d["created_at"])[:10], f"D{d['id']}", True)
@@ -93,14 +136,16 @@ def charts(notes: list[dict], docs: list[dict], db) -> list[dict]:
             add(f["test"], f.get("unit"), f["value"], n["date"], f"N{n['id']}.{f['section']}", False)
     out, bp = [], {}
     for (name, unit), series in points.items():
-        pts = [{k: p[k] for k in ("date", "value", "cite")} for p in sorted(series.values(), key=lambda p: p["date"])]
+        pts = [{k: p[k] for k in ("date", "value", "text", "cite")} | {"out": outside(name, unit, p["value"])} for p in sorted(series.values(), key=lambda p: p["date"])]
+        ser = {"name": name, "points": pts, "range": list(RANGES[name][:2]) if name in RANGES and unit.replace(" ", "").lower() in (RANGES[name][2], "") else None}
         if name.startswith("BP "):
-            bp[name] = pts
+            bp[name] = ser | {"name": name.split()[1].title()}
         else:
-            out.append({"test": name, "unit": unit, "series": [{"name": name, "points": pts}]})
+            out.append({"test": name, "unit": unit, "series": [ser]})
     if bp:
-        out.append({"test": "BP", "unit": "mmHg", "series": [{"name": k.split()[1].title(), "points": bp[k]} for k in ("BP systolic", "BP diastolic") if k in bp]})
-    return sorted(out, key=lambda c: -sum(len(s["points"]) for s in c["series"]))
+        out.append({"test": "BP", "unit": "mmHg", "series": [bp[k] for k in ("BP systolic", "BP diastolic") if k in bp]})
+    latest = lambda c: max(p["date"] for s_ in c["series"] for p in s_["points"])
+    return sorted(out, key=lambda c: (latest(c), sum(len(s_["points"]) for s_ in c["series"])), reverse=True)
 
 
 def build(db, v: dict) -> dict:
@@ -112,15 +157,16 @@ def build(db, v: dict) -> dict:
             body = (n["content"]["soap"].get(k) or "").strip()
             if body:
                 sources[f"N{n['id']}.{k}"] = {"kind": "note", "visit_id": n["vid"], "date": n["date"], "doctor": n["doctor"], "section": label,
-                                              "body": body, "text": f"{n['date']} {nice(n['date'])} {body}"}
+                                              "body": body, "text": f"{n['date']} {nice(n['date'])} {body}",
+                                              "values": [f for f in values_of(db, n) if f["section"] == k]}
     last_signed = max((n["signed_at"] or "" for n in notes), default="")
     new_ids = []
     for d in docs:
         ex, made = d["extracted"], d["created_at"][:10]
         vals = ", ".join(f'{f.get("name")} {f.get("value")} {f.get("unit") or ""}'.strip() for f in ex.get("findings") or [])
-        sources[f"D{d['id']}"] = {"kind": "document", "doc_id": d["id"], "filename": d["filename"], "date": made, "label": d["filename"].rsplit(".", 1)[0],
-                                  "summary": ex.get("summary") or "", "findings": ex.get("findings") or [],
-                                  "text": f"{made} {nice(made)} {d['filename']} {ex.get('summary') or ''} {vals}"}
+        sources[f"D{d['id']}"] = {"kind": "document", "doc_id": d["id"], "filename": d["filename"], "date": made, "label": title_of(d),
+                                  "summary": ex.get("summary") or "", "findings": ex.get("findings") or [], "values": ex.get("findings") or [],
+                                  "text": f"{made} {nice(made)} {title_of(d)} {ex.get('summary') or ''} {vals}"}
         if d["created_at"].replace(" ", "T") >= last_signed:   # older rows were stamped "YYYY-MM-DD HH:MM:SS"
             new_ids.append(f"D{d['id']}")
     visits = [{"note": f"N{n['id']}", "date_text": nice(n["date"])} for n in notes]
@@ -140,8 +186,27 @@ def build(db, v: dict) -> dict:
         if not got:   # the note's own words: why they came, what was found
             parts = [(f"{nid}.{k}", (ai.sentences(n["content"]["soap"].get(k) or "") or [""])[0]) for k in ("S", "A")]
             got = [{"text": " ".join(t for _, t in parts if t), "cites": [c for c, t in parts if t]}]
-        own_docs = [{"id": d["id"], "filename": d["filename"]} for d in docs if d["visit_id"] == n["vid"]]
+        own_docs = [{"id": d["id"], "filename": d["filename"], "title": title_of(d)} for d in docs if d["visit_id"] == n["vid"]]
         events.append({"visit_id": n["vid"], "date": n["date"], "doctor": n["doctor"], "text": got[0]["text"],
                        "cites": got[0]["cites"] + [f"D{d['id']}" for d in own_docs], "documents": own_docs})
     return {"summary": [{"kind": "new", "sentences": new}] * bool(new) + [{"kind": "history", "sentences": checked(text.get("history"), sources)}],
             "events": events, "charts": charts(notes, docs, db), "sources": sources, "basis": basis(notes, docs)}
+
+
+def prebuild(visit_id: int) -> None:
+    """Builds the brief in the background when a patient arrives or a report is read, so it's ready when the doctor opens it."""
+    db = connect()
+    try:
+        v = row(db.execute("select * from visits where id = ?", (visit_id,)).fetchone())
+        if not v or v["status"] not in ("waiting", "with_doctor"):
+            return
+        saved = json.loads(v["brief"]) if v["brief"] else None
+        if saved and saved.get("basis") == current_basis(db, v):
+            return
+        db.execute("update visits set brief = ? where id = ?", (json.dumps(build(db, v) | {"made_at": now()}), visit_id))
+        db.commit()
+    except Exception:
+        log.exception("Brief prebuild failed for visit %s", visit_id)
+    finally:
+        db.close()
+
