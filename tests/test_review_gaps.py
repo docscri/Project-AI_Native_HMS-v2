@@ -1,4 +1,4 @@
-"""Second review: each test replays the exact sequence that was reported."""
+"""Regression tests."""
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -31,7 +31,6 @@ def test_older_save_cannot_overwrite_newer_text():
         v = started_visit(c, h, doc)
         rev = c.get(f"/api/visits/{v['id']}", headers=h).json()["text_rev"]
         newer = c.put(f"/api/visits/{v['id']}/text", headers=h, json={"text": "Newer clinical text", "rev": rev}).json()
-        # a retry of the older save, still based on the old version, is refused
         assert c.put(f"/api/visits/{v['id']}/text", headers=h, json={"text": "Older clinical text", "rev": rev}).status_code == 409
         got = c.get(f"/api/visits/{v['id']}", headers=h).json()
         assert got["text"] == "Newer clinical text" and got["text_rev"] == newer["rev"]
@@ -46,10 +45,10 @@ def test_signer_survives_removal():
         n = c.post(f"/api/visits/{v['id']}/note", headers=h).json()
         c.post(f"/api/notes/{n['id']}/sign", headers=h2)
         r = c.delete(f"/api/members/{inv['id']}", headers=h).json()
-        assert r["deactivated"] and not r["removed"]               # a signer is kept (inactive), never deleted
+        assert r["deactivated"] and not r["removed"]
         db = connect(); db.execute("update notes set signed_by = null where id = ?", (n["id"],)); db.commit(); db.close()
         page = c.get(f"/api/notes/{n['id']}/print", params={"token": h["Authorization"].split()[1]}).text
-        assert "Signed by Dr. Two" in page                           # the name is stored with the signature itself
+        assert "Signed by Dr. Two" in page
 
 
 def test_refund_offered_after_pay_undo_pay():
@@ -61,7 +60,7 @@ def test_refund_offered_after_pay_undo_pay():
         c.post(f"/api/visits/{v['id']}/undo-arrival", headers=h, json={"reason": "Wrong patient"})
         c.post(f"/api/visits/{v['id']}/arrive", headers=h, json={"payment_method": "cash"})
         q = c.get("/api/operations/queue", headers=h, params={"doctor_id": doc, "date": TODAY}).json()
-        assert q["columns"]["waiting"][0]["refundable"] == 300      # the screen uses this to show Refund
+        assert q["columns"]["waiting"][0]["refundable"] == 300
 
 
 def test_upgrade_reconciles_old_undone_arrivals():
@@ -70,7 +69,7 @@ def test_upgrade_reconciles_old_undone_arrivals():
         p = c.post("/api/patients", headers=h, json={"name": "Old", "consent": True}).json()
         v = c.post("/api/visits", headers=h, json={"patient_id": p["id"], "doctor_id": doc, "date": TODAY}).json()
         db = connect()
-        # what the old version left behind: payment cleared, refund kept, and only the refund imported
+        # legacy state: payment cleared, only the refund imported
         db.execute("update visits set refund_amount = 300, refund_reason = 'Arrival undone', refunded_at = ? where id = ?", (f"{TODAY}T10:00:00", v["id"]))
         db.execute("insert into payments (clinic_id, visit_id, kind, amount, reason, at) select clinic_id, id, 'refund', 300, 'Arrival undone', ? from visits where id = ?",
                    (f"{TODAY}T10:00:00", v["id"]))

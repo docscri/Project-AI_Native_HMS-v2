@@ -1,5 +1,4 @@
-"""Front desk: the day, doctor queues, booking, walk-in, arrival + payment, receipts, refunds, queue order,
-reschedule, cancel, no-show, receipts and refunds."""
+"""Front desk: queues, booking, payments, refunds, waitlist."""
 import html
 from datetime import date as Date
 
@@ -17,10 +16,9 @@ from .clinic import clinic_of
 router = APIRouter(prefix="/api")
 front_desk = require_screen("operations")
 
-# Allowed status moves. Everything else is refused.
 MOVES = {
     "booked": {"waiting", "cancelled", "no_show"},
-    "waiting": {"with_doctor", "booked"},   # waiting -> booked is "undo arrival"
+    "waiting": {"with_doctor", "booked"},   # undo arrival
     "with_doctor": {"done"},
 }
 CANCEL_REASONS = {"Patient request", "Doctor unavailable", "Booked by mistake", "Other"}
@@ -42,12 +40,12 @@ def get_visit(db, me, visit_id: int) -> dict:
 
 
 def doctor_letters(db, clinic_id: int) -> dict[int, str]:
-    """A, B, C… per doctor so tokens read like A03 and B12 on a shared screen."""
+    """Per-doctor letter so tokens read A03, B12."""
     ids = [r[0] for r in db.execute("select id from members where clinic_id = ? and kind = 'doctor' order by id", (clinic_id,))]
     return {d: chr(65 + i % 26) for i, d in enumerate(ids)}
 
 
-# Only these visit columns leave the server from Operations. Clinical text (dictation, transcript, brief) never does.
+# Clinical text must never leave via Operations.
 VISIT_FIELDS = ", ".join("v." + c for c in (
     "id", "clinic_id", "patient_id", "doctor_id", "date", "session_start", "token", "status", "is_walk_in", "fee",
     "payment_method", "paid_at", "arrived_at", "started_at", "completed_at", "cancel_reason", "created_at", "discount",
@@ -82,8 +80,7 @@ def visit_rows(db, me, where: str, args: tuple) -> list[dict]:
 
 
 def auto_no_show(db, me, day: str) -> None:
-    """Booked patients who never arrived become no-shows once their session has ended.
-    Patients marked "late" keep their place until the end of the day."""
+    """No-show after session end; "late" patients wait until day end."""
     clinic = clinic_of(db, me)
     today, hhmm = Date.today().isoformat(), now_hhmm()
     for v in rows(db.execute("select * from visits where clinic_id = ? and date <= ? and status = 'booked'",
@@ -98,11 +95,9 @@ def auto_no_show(db, me, day: str) -> None:
             move(db, me, v, "no_show")
 
 
-# ---------- reads ----------
 
 @router.get("/operations/day")
 def day_view(date: str, me=Depends(front_desk), db=Depends(get_db)):
-    """Doctor cards for the date, plus every visit that day."""
     date = valid_day(date)
     auto_no_show(db, me, date)
     clinic = clinic_of(db, me)
@@ -128,7 +123,6 @@ def day_view(date: str, me=Depends(front_desk), db=Depends(get_db)):
 
 @router.get("/operations/queue")
 def queue(doctor_id: int, date: str, me=Depends(front_desk), db=Depends(get_db)):
-    """One doctor's four columns. Waiting is in queue order."""
     date = valid_day(date)
     clinic_doctor(db, me, doctor_id)
     auto_no_show(db, me, date)
@@ -140,7 +134,6 @@ def queue(doctor_id: int, date: str, me=Depends(front_desk), db=Depends(get_db))
             "columns": cols, "not_seen": [v for v in vs if v["status"] in ("cancelled", "no_show")]}
 
 
-# ---------- writes ----------
 
 class Payment(BaseModel):
     payment_method: str | None = Field(default=None, pattern="^(cash|upi|card)$")
@@ -152,8 +145,8 @@ class Booking(BaseModel):
     patient_id: int
     doctor_id: int
     date: str
-    session: str | None = None   # session start time; default is the first open session
-    token: int | None = None     # pick a specific free token; default is the next free one
+    session: str | None = None   # default: first open session
+    token: int | None = None     # default: next free
 
 
 class WalkIn(Payment):
@@ -199,7 +192,6 @@ def pick_token(avail: dict, wanted: int | None) -> int | None:
 
 
 def charge(db, me, fee: int, body: Payment) -> dict:
-    """Validated payment fields for a visit, with the next receipt number."""
     if body.discount > fee:
         raise HTTPException(422, "Discount cannot be more than the fee.")
     amount = fee - body.discount
@@ -215,13 +207,13 @@ def charge(db, me, fee: int, body: Payment) -> dict:
 
 
 def ledger(db, me, visit_id: int, kind: str, amount: int, method=None, receipt=None, reason=None, at=None) -> None:
-    """One row per payment or refund, never overwritten."""
+    """Append-only."""
     db.execute("insert into payments (clinic_id, visit_id, kind, amount, method, receipt_no, reason, at, by_member) values (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                (me["clinic_id"], visit_id, kind, amount, method, receipt, reason, at or now(), me["id"]))
 
 
 def balance(db, visit_id: int) -> int:
-    """Money still held for a visit: everything paid minus everything refunded."""
+    """Paid minus refunded."""
     return db.execute("select coalesce(sum(case when kind = 'payment' then amount else -amount end), 0) from payments where visit_id = ?",
                       (visit_id,)).fetchone()[0]
 
@@ -241,7 +233,7 @@ def book(body: Booking, me=Depends(front_desk), db=Depends(get_db)):
 
 
 def create_booking(db, me, patient_id, doctor_id, day, session=None, wanted=None, follow_up_of=None) -> dict:
-    """Book a patient. Callers hold the token lock for this doctor and day."""
+    """Caller must hold the token lock."""
     day = valid_day(day)
     clinic_doctor(db, me, doctor_id)
     clinic = clinic_of(db, me)
@@ -263,7 +255,6 @@ def create_booking(db, me, patient_id, doctor_id, day, session=None, wanted=None
 
 @router.post("/visits/walk-in")
 def walk_in(body: WalkIn, me=Depends(front_desk), db=Depends(get_db)):
-    """Patient at the counter, no booking: pay, get the next token, go straight to Waiting."""
     today = Date.today().isoformat()
     clinic_doctor(db, me, body.doctor_id)
     db.lock(f"tokens:{body.doctor_id}:{today}")
@@ -287,7 +278,6 @@ def walk_in(body: WalkIn, me=Depends(front_desk), db=Depends(get_db)):
 
 @router.post("/visits/{visit_id}/arrive")
 def arrive(visit_id: int, body: Payment, me=Depends(front_desk), db=Depends(get_db)):
-    """Arrived → collect fee → token (if given at arrival) → Waiting."""
     v = get_visit(db, me, visit_id)
     db.lock(f"tokens:{v['doctor_id']}:{v['date']}")
     v = get_visit(db, me, visit_id)
@@ -307,7 +297,7 @@ def arrive(visit_id: int, body: Payment, me=Depends(front_desk), db=Depends(get_
 
 @router.post("/visits/{visit_id}/undo-arrival")
 def undo_arrival(visit_id: int, body: Cancel, me=Depends(front_desk), db=Depends(get_db)):
-    """Marked as arrived by mistake: back to Booked, and the payment is refunded."""
+    """Undo arrival and refund."""
     v = get_visit(db, me, visit_id)
     if v["status"] != "waiting" or v["is_walk_in"]:
         raise HTTPException(409, "This arrival can't be undone.")
@@ -343,7 +333,6 @@ def refund(visit_id: int, body: Refund, me=Depends(front_desk), db=Depends(get_d
 
 @router.post("/visits/{visit_id}/queue")
 def reorder(visit_id: int, direction: str, me=Depends(front_desk), db=Depends(get_db)):
-    """Move a waiting patient one place up or down within their session."""
     v = get_visit(db, me, visit_id)
     if v["status"] != "waiting":
         raise HTTPException(409, "Only waiting patients can be moved.")
@@ -351,7 +340,7 @@ def reorder(visit_id: int, direction: str, me=Depends(front_desk), db=Depends(ge
     line = rows(db.execute(
         "select id, queue_order from visits where doctor_id = ? and date = ? and session_start = ? and status = 'waiting' order by queue_order, token, id",
         (v["doctor_id"], v["date"], v["session_start"])))
-    for i, x in enumerate(line):  # renumber so orders are 1..n without gaps
+    for i, x in enumerate(line):
         x["queue_order"] = i + 1
     i = next(i for i, x in enumerate(line) if x["id"] == visit_id)
     j = i - 1 if direction == "up" else i + 1
@@ -365,7 +354,7 @@ def reorder(visit_id: int, direction: str, me=Depends(front_desk), db=Depends(ge
 
 @router.post("/visits/{visit_id}/late")
 def toggle_late(visit_id: int, me=Depends(front_desk), db=Depends(get_db)):
-    """A booked patient called to say they are running late: keep the booking past session end."""
+    """Exempt from the session-end no-show rule."""
     v = get_visit(db, me, visit_id)
     if v["status"] != "booked":
         raise HTTPException(409, "Only booked patients can be late.")
@@ -406,7 +395,6 @@ def cancel(visit_id: int, body: Cancel, me=Depends(front_desk), db=Depends(get_d
 def end_session(doctor_id: int, date: str, session: str | None = None, me=Depends(front_desk), db=Depends(get_db)):
     date = valid_day(date)
     clinic_doctor(db, me, doctor_id)
-    """Mark everyone still in Booked as no-show (the automatic rule runs at session end too)."""
     n = 0
     for v in rows(db.execute("select * from visits where clinic_id = ? and doctor_id = ? and date = ? and status = 'booked'",
                              (me["clinic_id"], doctor_id, date))):
@@ -417,7 +405,6 @@ def end_session(doctor_id: int, date: str, session: str | None = None, me=Depend
     return {"no_shows": n}
 
 
-# ---------- money ----------
 
 def money(n) -> str:
     return f"₹{(n or 0):,}"
@@ -425,7 +412,7 @@ def money(n) -> str:
 
 @router.get("/visits/{visit_id}/receipt", response_class=HTMLResponse)
 def receipt(visit_id: int, token: str, auto: int = 0, db=Depends(get_db)):
-    """Printable receipt. The login token is in the query so it opens in a new tab."""
+    """Token in the query so it opens in a new tab."""
     m = member_for_token(db, token)
     if not m:
         return HTMLResponse(printpage.message("Log in again", "Your session has ended. Open the receipt from the app."), 401)
@@ -461,7 +448,6 @@ def list_doctors(me=Depends(current_member), db=Depends(get_db)):
     return [d | {"letter": letters[d["id"]]} for d in ds]
 
 
-# ---------- waitlist ----------
 
 class WaitIn(BaseModel):
     patient_id: int
@@ -494,7 +480,6 @@ def join_waitlist(body: WaitIn, me=Depends(front_desk), db=Depends(get_db)):
 def waitlist(doctor_id: int, date: str, me=Depends(front_desk), db=Depends(get_db)):
     date = valid_day(date)
     clinic_doctor(db, me, doctor_id)
-    """Who is waiting for a place, oldest first, and whether a place is open now."""
     items = rows(db.execute(
         """select w.*, p.name as patient_name, p.uhid, p.phone from waitlist w join patients p on p.id = w.patient_id
            where w.clinic_id = ? and w.doctor_id = ? and w.date = ? and w.status = 'waiting' order by w.id""",

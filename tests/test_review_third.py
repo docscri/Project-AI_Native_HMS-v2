@@ -1,4 +1,4 @@
-"""Third review: a save must name its version, and old payment histories are rebuilt from the event log."""
+"""Versioned saves and legacy ledger rebuild."""
 import importlib.util
 import json
 from datetime import date
@@ -31,7 +31,7 @@ def t(hh):
 
 
 def legacy(db, clinic_id, vid, events, **cols):
-    """What the old version left: the visit's final columns, its event log, and the 010 + 011 imports."""
+    """Legacy state: final columns, event log, 010 + 011 imports."""
     cols = {"status": "waiting", "paid_at": None, "amount_paid": None, "payment_method": None, "receipt_no": None,
             "refund_amount": 0, "refund_reason": None, "refunded_at": None, **cols}
     db.execute(f"update visits set {', '.join(k + ' = ?' for k in cols)} where id = ?", (*cols.values(), vid))
@@ -75,7 +75,7 @@ def test_upgrade_rebuilds_old_payment_histories():
         # pay 300 -> undo -> pay 200 -> refund 50: holds 150
         legacy(db, cid, ids[3], [paid(300, 6, 10), undo(300), paid(200, 7, 12), ("refunded", {"amount": 50, "reason": "Change"})],
                paid_at=t(12), amount_paid=200, payment_method="cash", receipt_no=7, refund_amount=350, refund_reason="Change", refunded_at=t(13))
-        # the old undo refunded the full payment again after a partial refund: doesn't add up, so it's left for review
+        # inconsistent history: left for review
         legacy(db, cid, ids[4], [paid(300, 8, 10), ("refunded", {"amount": 100, "reason": "Discount"}), undo(400)],
                status="booked", refund_amount=400, refund_reason="Arrival undone", refunded_at=t(12))
         # paid by the columns, but no history at all: left for review

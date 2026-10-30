@@ -1,6 +1,4 @@
-"""Uploaded files. Supabase Storage when SUPABASE_URL and SUPABASE_SERVICE_KEY are set, otherwise data/uploads.
-
-Stored paths look like "supabase:<object path>" or a local file path, so both kinds can live side by side."""
+"""Uploads: Supabase Storage if configured, else data/uploads."""
 import os
 import uuid
 

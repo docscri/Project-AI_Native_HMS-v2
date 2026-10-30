@@ -1,4 +1,4 @@
-"""Register, search, profile and visit timeline."""
+"""Patients."""
 import json
 from datetime import date
 
@@ -18,7 +18,7 @@ class PatientIn(BaseModel):
     sex: str | None = None
     phone: str = ""
     address: str = ""
-    consent: bool = False   # patient agreed to the clinic keeping their health records
+    consent: bool = False   # agreed to record keeping
 
 
 class PatientEdit(BaseModel):
@@ -30,7 +30,7 @@ class PatientEdit(BaseModel):
 
 
 def clean(body) -> dict:
-    """Check name, phone, date of birth (age 0–120) and sex. Returns only the fields that were sent."""
+    """Returns only the fields that were sent."""
     out = body.model_dump(exclude_none=True)
     if "name" in out:
         out["name"] = " ".join(out["name"].split())
@@ -59,7 +59,7 @@ def clean(body) -> dict:
 
 
 def similar(db, clinic_id: int, name: str, phone: str, dob: str | None, exclude: int | None = None) -> list[dict]:
-    """Patients who may be the same person: same phone, or same name (and same date of birth when both are known)."""
+    """Same phone, or same name (and DOB when both known)."""
     found = rows(db.execute(
         """select id, uhid, name, phone, dob, sex from patients where clinic_id = ? and id is not ?
            and ((phone = ? and phone != '') or lower(name) = lower(?)) order by id""",
@@ -76,7 +76,6 @@ def get_patient(db, me, patient_id: int) -> dict:
 
 @router.get("/check")
 def check(name: str = "", phone: str = "", dob: str | None = None, me=Depends(require_any("operations", "patients", "consultation")), db=Depends(get_db)):
-    """Before registering: anyone who may already be this patient."""
     return similar(db, me["clinic_id"], " ".join(name.split()), clean_phone(phone), dob or None)
 
 
@@ -141,7 +140,7 @@ class Merge(BaseModel):
 
 @router.post("/{patient_id}/merge")
 def merge(patient_id: int, body: Merge, me=Depends(require_screen("patients")), db=Depends(get_db)):
-    """Same person registered twice: move the other record's visits, notes and documents here, then remove it."""
+    """Move the other record's history here, then delete it."""
     keep = get_patient(db, me, patient_id)
     other = get_patient(db, me, body.other_id)
     if keep["id"] == other["id"]:

@@ -1,5 +1,4 @@
-"""Optional email. Configure SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASSWORD, SMTP_FROM to send mail;
-without them, emails are skipped and admins share links by hand."""
+"""Optional SMTP email; skipped when SMTP_* is unset."""
 import html
 import os
 import smtplib
@@ -11,7 +10,6 @@ def enabled() -> bool:
 
 
 def send(to: str, subject: str, body: str, html_body: str | None = None) -> bool:
-    """Plain text always (every mail app shows it); the branded HTML version is added when given."""
     if not enabled():
         return False
     msg = EmailMessage()
@@ -36,7 +34,7 @@ def app_url() -> str:
 
 
 def branded(clinic: str, heading: str, text: str, button: str, link: str, note: str) -> str:
-    """Email in the app's look. Tables and inline styles only, so Gmail, Outlook and phones all show it the same."""
+    """Tables and inline styles only, for email-client compatibility."""
     e = html.escape
     return f"""<!doctype html><html><body style="margin:0;padding:0;background:#E8F1EC">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#E8F1EC;padding:32px 12px"><tr><td align="center">

@@ -1,4 +1,4 @@
-"""Doctor workspace: today's list, start, brief, dictation, documents, note draft → edit → sign."""
+"""Doctor workspace."""
 import html
 import json
 import mimetypes
@@ -58,11 +58,9 @@ def evidence_for(db, v: dict) -> tuple[dict, list[dict]]:
     return patient, ai.evidence(text_of(v), docs, past_notes(db, v["patient_id"], v["id"]))
 
 
-# ---------- list + workspace ----------
 
 @router.get("/consultation/today")
 def today(doctor_id: int | None = None, me=Depends(doctor_screen), db=Depends(get_db)):
-    """Paid, arrived patients for this doctor today, in token order."""
     did = doctor_id or (me["id"] if me["kind"] == "doctor" else None)
     if not did:
         raise HTTPException(422, "Choose a doctor.")
@@ -112,7 +110,6 @@ def workspace(visit_id: int, me=Depends(require_any("consultation", "patients"))
     return out
 
 
-# ---------- brief ----------
 
 @router.post("/visits/{visit_id}/brief")
 def make_brief(visit_id: int, me=Depends(doctor_screen), db=Depends(get_db)):
@@ -123,10 +120,9 @@ def make_brief(visit_id: int, me=Depends(doctor_screen), db=Depends(get_db)):
     return b
 
 
-# ---------- dictation ----------
 
 def text_of(v: dict) -> str:
-    """The visit's free text. Visits from before the shared space keep their dictated lines, joined."""
+    """Legacy visits fall back to their joined dictation lines."""
     if v.get("dictation"):
         return v["dictation"]
     return "\n".join(s["text"] for s in json.loads(v["transcript"] or "[]"))
@@ -134,7 +130,7 @@ def text_of(v: dict) -> str:
 
 class FreeText(BaseModel):
     text: str = Field(max_length=100_000)
-    rev: int   # the version this text was based on; a save based on an older version is refused
+    rev: int   # stale versions are refused
 
 
 def editable(db, v: dict) -> None:
@@ -147,7 +143,6 @@ def editable(db, v: dict) -> None:
 
 @router.put("/visits/{visit_id}/text")
 def save_text(visit_id: int, body: FreeText, me=Depends(doctor_screen), db=Depends(get_db)):
-    """The one writing space: typed and dictated text together, saved as the doctor works."""
     v = get_visit(db, me, visit_id)
     editable(db, v)
     if db.execute("update visits set dictation = ?, dictation_rev = dictation_rev + 1 where id = ? and dictation_rev = ?",
@@ -164,7 +159,7 @@ class Segment(BaseModel):
 
 @router.post("/visits/{visit_id}/transcript")
 def add_segment(visit_id: int, body: Segment, me=Depends(doctor_screen), db=Depends(get_db)):
-    """Adds a line at the end of the visit's text (older clients and scripts)."""
+    """Legacy append endpoint."""
     v = get_visit(db, me, visit_id)
     editable(db, v)
     text = (text_of(v).rstrip() + "\n" + body.text.strip()).strip()
@@ -172,7 +167,6 @@ def add_segment(visit_id: int, body: Segment, me=Depends(doctor_screen), db=Depe
     return {"text": text}
 
 
-# ---------- documents ----------
 
 def run_extraction(doc_id: int) -> None:
     db = connect()
@@ -181,7 +175,7 @@ def run_extraction(doc_id: int) -> None:
         try:
             ex = ai.extract_document(storage.read(d["path"]), d["mime"], d["filename"])
             db.execute("update documents set ai_status = 'ready', extracted = ? where id = ?", (json.dumps(ex), doc_id))
-        except Exception as e:  # keep the file; mark it so the UI can say so
+        except Exception as e:  # keep the file, flag the failure
             db.execute("update documents set ai_status = 'failed', extracted = ? where id = ?",
                        (json.dumps({"summary": f"Could not read: {e}", "findings": []}), doc_id))
         db.commit()
@@ -225,7 +219,6 @@ def document_file(doc_id: int, me=Depends(require_any("consultation", "patients"
     return Response(data, media_type=d["mime"], headers={"Content-Disposition": f'inline; filename="{d["filename"]}"'})
 
 
-# ---------- notes ----------
 
 class NoteEdit(BaseModel):
     soap: dict[str, str]
@@ -256,7 +249,6 @@ def draft(visit_id: int, me=Depends(doctor_screen), db=Depends(get_db)):
 
 @router.post("/visits/{visit_id}/note")
 def blank_note(visit_id: int, me=Depends(doctor_screen), db=Depends(get_db)):
-    """An empty note the doctor writes by hand, next to the transcript."""
     v = get_visit(db, me, visit_id)
     if v["status"] != "with_doctor":
         raise HTTPException(409, "Start the visit first.")
@@ -274,7 +266,7 @@ class FollowUp(BaseModel):
 
 @router.post("/visits/{visit_id}/follow-up")
 def follow_up(visit_id: int, body: FollowUp, me=Depends(doctor_screen), db=Depends(get_db)):
-    """Book the same patient with the same doctor on a later day. If that day is full, they join the waitlist."""
+    """Waitlists when the day is full."""
     from .operations import add_to_waitlist, create_booking
     v = get_visit(db, me, visit_id)
     body.date = valid_day(body.date)
@@ -305,7 +297,6 @@ def edit_note(note_id: int, body: NoteEdit, me=Depends(doctor_screen), db=Depend
 
 @router.post("/notes/{note_id}/sign")
 def sign(note_id: int, me=Depends(doctor_screen), db=Depends(get_db)):
-    """Signing locks the note and completes the visit."""
     n = row(db.execute("select * from notes where id = ? and clinic_id = ?", (note_id, me["clinic_id"])).fetchone())
     if not n:
         raise HTTPException(404, "Note not found.")
@@ -314,7 +305,7 @@ def sign(note_id: int, me=Depends(doctor_screen), db=Depends(get_db)):
     if me["kind"] != "doctor":
         raise HTTPException(403, "Only a doctor can sign.")
     ts = now()
-    # The status check is part of the write, so a save or a second signature racing this one can't slip through.
+    # Status check is in the write itself to block racing saves/signs.
     if db.execute("update notes set status = 'signed', signed_at = ?, signed_by = ?, signed_by_name = ? where id = ? and status = 'draft'",
                   (ts, me["id"], me["name"], note_id)).rowcount != 1:
         raise HTTPException(409, "Already signed.")
@@ -327,7 +318,7 @@ def sign(note_id: int, me=Depends(doctor_screen), db=Depends(get_db)):
 
 @router.get("/notes/{note_id}/print", response_class=HTMLResponse)
 def print_note(note_id: int, token: str, auto: int = 0, db=Depends(get_db)):
-    """Printable A4 page in the app's look (browser Print → Save as PDF). Token in the query so it opens in a new tab."""
+    """Token in the query so it opens in a new tab."""
     me = member_for_token(db, token)
     n = row(db.execute("select * from notes where id = ?", (note_id,)).fetchone())
     if not me:

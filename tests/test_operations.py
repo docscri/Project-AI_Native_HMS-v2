@@ -1,4 +1,4 @@
-"""Sessions, leave, billing (discount, waiver, receipt, refund, undo arrival), queue order and late patients."""
+"""Sessions, billing, queue order."""
 from datetime import date, timedelta
 
 from fastapi.testclient import TestClient
@@ -98,7 +98,6 @@ def test_waitlist_and_follow_up():
         assert c.get("/api/waitlist", headers=h, params={"doctor_id": doc, "date": TOMORROW}).json()["open"] is True
         assert c.post(f"/api/waitlist/{w['id']}/book", headers=h).json()["token"] == 1
         assert c.get("/api/waitlist", headers=h, params={"doctor_id": doc, "date": TOMORROW}).json()["items"] == []
-        # follow-up: books when there is room, waitlists when the day is full
         v = c.post("/api/visits/walk-in", headers=h, json={"patient_id": a, "doctor_id": doc, "payment_method": "cash"}).json()
         later = (date.today() + timedelta(days=2)).isoformat()
         f = c.post(f"/api/visits/{v['id']}/follow-up", headers=h, json={"date": later}).json()

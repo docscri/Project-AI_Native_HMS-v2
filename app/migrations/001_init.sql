@@ -1,4 +1,4 @@
--- One clinic, its people, patients and visits. Money is integer rupees.
+-- Money is integer rupees.
 
 create table if not exists clinics (
     id integer primary key,
@@ -106,7 +106,7 @@ create table if not exists notes (
     patient_id integer not null references patients(id),
     visit_id integer not null unique references visits(id),
     doctor_id integer not null references members(id),
-    content text not null,          -- {"soap": {"S","O","A","P"}, "rx": [{medicine, dose, duration, instructions}]}
+    content text not null,          -- {"soap": {...}, "rx": [...]}
     citations text not null default '{}',
     status text not null default 'draft' check (status in ('draft', 'signed')),
     signed_at text,

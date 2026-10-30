@@ -16,7 +16,7 @@ app = FastAPI(title="Clinic V1")
 
 @app.exception_handler(ValueError)
 def bad_value(request, exc):
-    """A malformed date, month or number in a request is the caller's mistake (422), not a server error."""
+    """Bad input is a 422, not a 500."""
     from fastapi.responses import JSONResponse
     return JSONResponse({"detail": "Check the dates."}, status_code=422)
 for r in (clinic, schedules, patients, operations, consultation, team):
@@ -40,7 +40,7 @@ app.mount("/static", StaticFiles(directory=FRONTEND), name="static")
 
 
 def page() -> str:
-    """index.html with app.css / app.js tagged by their content, so a deploy is picked up without a hard refresh."""
+    """Cache-bust assets by content hash."""
     html = (FRONTEND / "index.html").read_text()
     for name in ("app.css", "app.js"):
         tag = hashlib.sha1((FRONTEND / name).read_bytes()).hexdigest()[:10]

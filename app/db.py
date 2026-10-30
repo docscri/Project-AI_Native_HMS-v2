@@ -1,10 +1,4 @@
-"""Database access. Supabase (Postgres) when DATABASE_URL is set, otherwise a local SQLite file.
-
-Both backends expose the same small interface used across the app:
-    db.execute(sql, params) -> cursor with fetchone() / fetchall() / lastrowid, iterable
-    db.lock(key)            -> serialise writes that allocate numbers (tokens, UHIDs)
-Queries are written once with `?` placeholders.
-"""
+"""Postgres when DATABASE_URL is set, else SQLite; queries use `?` placeholders."""
 import importlib.util
 import json
 import os
@@ -24,7 +18,6 @@ def is_postgres() -> bool:
     return DATABASE_URL.startswith(("postgres://", "postgresql://"))
 
 
-# ---------- SQLite ----------
 
 def _sqlite() -> sqlite3.Connection:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -48,7 +41,7 @@ class SqliteDB:
         self.conn.executescript(sql)
 
     def lock(self, key):
-        # A write transaction blocks other writers until commit, so reads that follow are race free.
+        # Take the write lock up front so following reads are race free.
         if not self.conn.in_transaction:
             self.conn.execute("begin immediate")
 
@@ -62,7 +55,6 @@ class SqliteDB:
         self.conn.close()
 
 
-# ---------- Postgres (Supabase) ----------
 
 class Row(dict):
     """dict that also answers row[0], like sqlite3.Row."""
@@ -117,7 +109,7 @@ class PgDB:
         add_id = bool(m) and " returning " not in sql.lower() and m.group(1) not in _NO_ID
         cur = self.conn.cursor()
         cur.execute(to_pg(sql) + (" returning id" if add_id else ""), tuple(params))
-        got = cur.fetchone() if add_id else None   # an insert ... select may insert nothing
+        got = cur.fetchone() if add_id else None   # insert ... select may insert nothing
         lastrowid = got["id"] if got else None
         return PgCursor(cur, lastrowid)
 
@@ -142,7 +134,6 @@ def connect():
     return PgDB() if is_postgres() else SqliteDB()
 
 
-# ---------- migrations ----------
 
 def _dialect_sql(sql: str, dialect: str) -> str:
     if dialect == "postgres":
@@ -152,14 +143,14 @@ def _dialect_sql(sql: str, dialect: str) -> str:
 
 
 def migrate() -> None:
-    """Apply app/migrations/NNN_name.sql (or .py) in order, once each."""
+    """Apply app/migrations in order, once each."""
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     db = connect()
     try:
         db.script("create table if not exists schema_version (version integer primary key, name text not null, applied_at text)")
         db.commit()
         done = {r[0] for r in db.execute("select version from schema_version").fetchall()}
-        # Databases created before migrations existed already have the 001 tables.
+        # Pre-migration databases already have the 001 tables.
         if not done:
             exists = db.execute(
                 "select 1 from sqlite_master where type = 'table' and name = 'clinics'" if db.dialect == "sqlite"
@@ -172,7 +163,7 @@ def migrate() -> None:
             version = int(path.name.split("_", 1)[0])
             if version in done:
                 continue
-            if path.suffix == ".py":   # data repairs that are clearer in Python: the file's run(db)
+            if path.suffix == ".py":   # runs the module's run(db)
                 spec = importlib.util.spec_from_file_location(path.stem, path)
                 module = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(module)

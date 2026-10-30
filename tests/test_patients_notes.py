@@ -1,4 +1,4 @@
-"""Patient checks, duplicates and merge, a hand-written note, and the activity log."""
+"""Patients, merge, notes, activity log."""
 from datetime import date
 
 from fastapi.testclient import TestClient

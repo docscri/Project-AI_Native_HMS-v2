@@ -1,10 +1,10 @@
-/* Clinic V1 — single-page frontend. Hash routes, one state object, event delegation on data-a. */
+/* Hash routes, one state object, event delegation on data-a. */
 "use strict";
 
 const S = { token: null, me: null, clinic: null, doctors: [], date: null, data: null, timer: null, rec: null };
 try { S.token = localStorage.getItem("clinic.token"); } catch {}
 
-/* ---------- helpers ---------- */
+/* helpers */
 const $ = (s, el = document) => el.querySelector(s);
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const iso = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -25,7 +25,6 @@ const RESCHED_REASONS = ["Patient asked", "Doctor unavailable", "Clinic change"]
 const REFUND_REASONS = ["Charged twice", "Visit not done", "Fee changed"];
 const reasonChips = (list, cur, a) => `<div class="seg reason-seg">${list.map(r => `<button data-a="${a}" data-v="${esc(r)}" aria-pressed="${r === cur}">${r}</button>`).join("")}</div>`;
 const feeTile = fee => `<div class="tk fee"><small>Fee</small><b id="pay-due">${rupees(fee)}</b></div>`;
-// Fee tile (unless it already sits beside the token), then payment method and discount on one line.
 function payBlock(fee, pay, feeShown) {
   return `<div class="pay-box">${feeShown ? "" : `<div class="tiles-row">${feeTile(fee)}</div>`}
     <div class="pay-line"><div class="seg" id="pay-seg">${[["cash", "Cash"], ["upi", "UPI"], ["card", "Card"], ["waive", "Waive"]].map(([m, l]) => `<button data-a="pay" data-v="${m}" aria-pressed="${m === pay}">${l}</button>`).join("")}</div>
@@ -82,7 +81,7 @@ function endLocal() { setToken(null); S.me = null; stopTimers(); closeModal(); g
 async function logout() { if (S.token) await fetch("/api/auth/logout", { method: "POST", headers: { Authorization: "Bearer " + S.token } }).catch(() => {}); endLocal(); }
 function stopTimers() { clearInterval(S.timer); S.timer = null; clearTimeout(S.docT); if (S.rec) { const r = S.rec; S.rec = null; try { r.stop(); } catch {} } S.recState = null; clearInterval(S.recT); }
 
-/* ---------- routing ---------- */
+/* routing */
 const SCREENS = [["operations", "#/ops", "Operations", icon.ops], ["patients", "#/patients", "Patients", icon.patients],
   ["consultation", "#/consult", "Consultation", icon.consult], ["administration", "#/admin", "Administration", icon.admin]];
 
@@ -119,7 +118,7 @@ async function route() {
 
 function shell(active) {
   const m = S.me;
-  if ($("#view") && S.shellFor === active) return;   // same screen: keep the frame so the page doesn't flash or scroll
+  if ($("#view") && S.shellFor === active) return;   // keep the frame to avoid flash/scroll
   S.shellFor = active;
   $("#root").innerHTML = `<div class="app">
     <nav class="nav" aria-label="Main">
@@ -140,7 +139,7 @@ const view = (html, g) => {
 };
 const stale = g => g !== S.gen;
 
-/* ---------- login / onboarding / invite ---------- */
+/* login, onboarding, invite */
 const WAVE_H = [14, 26, 40, 22, 48, 34, 18, 52, 30, 44, 20, 38, 54, 28, 16, 42, 50, 24, 36, 46, 18, 32, 52, 26, 40, 20, 48, 30];
 const wave = () => `<div class="login-wave" aria-hidden="true">${Array.from({ length: 64 }, (_, i) => `<span style="--h:${WAVE_H[(i * 11) % 28]}px;animation-delay:${(i % 28) * 40}ms"></span>`).join("")}</div>`;
 const arrowRight = '<svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>';
@@ -243,7 +242,7 @@ document.addEventListener("submit", e => {
   });
 });
 
-/* clinic rules form (onboarding + admin) */
+/* clinic rules form */
 const sessionsOf = v => v.sessions?.length ? v.sessions.map(x => ({ start: x.start, end: x.end })) : [{ start: v.start || "09:00", end: v.end || "13:00" }];
 function limitBlock(p, v) {
   const ss = sessionsOf(v), f = ss[0];
@@ -280,7 +279,7 @@ function rulesForm(p, c) {
 const readRules = p => ({ fee: Number($(`#${p}-fee`).value) || 0, days: [0, 1, 2, 3, 4, 5, 6].filter(i => $(`#${p}-d${i}`).checked),
   ...readLimit(p), token_timing: $(`input[name="${p}-tok"]:checked`).value });
 
-/* ---------- operations ---------- */
+/* operations */
 async function viewOps() {
   const g = S.gen;
   S.date = S.date || TODAY;
@@ -378,7 +377,7 @@ function qCard(v, i, list) {
 }
 const refresh = () => route();
 
-/* ---------- booking / walk-in / reschedule modal ---------- */
+/* booking modal */
 let M = null;
 function openBooking(mode, opts = {}) {
   M = { kind: "booking", mode, patient: opts.patient || null, q: "", results: [], doctorId: opts.doctorId || S.doctors[0]?.id, date: mode === "walk" ? TODAY : (S.date && S.date >= TODAY ? S.date : TODAY),
@@ -567,7 +566,6 @@ async function saveMember() {
   S.doctors = await api("/doctors"); closeModal();
   if (OB.step === 4 && !S.clinic.onboarded) loadMembersStep(); else route();
 }
-// Invite or password-reset link: one link that can be emailed and copied.
 function openShare(what, id, code, emailOn) {
   const m = (S.members || []).find(x => x.id === id), back = M?.kind === "member" ? M : null;
   const link = `${location.origin}/#/${what}/${code}`;
@@ -588,7 +586,7 @@ async function openAccount() {
   const upcoming = myLeave.filter(l => l.end_date >= TODAY && ["pending", "approved"].includes(l.status));
   modal(`<div class="mb-head"><div class="avatar big">${esc(initials(m.name))}</div><div><h2>${esc(m.name)}</h2><span class="muted">${esc(doc ? m.speciality || "Doctor" : m.designation || "Staff")}</span></div>
       <span class="grow"></span>${att.check_out ? `<span class="pill s-paid">${hhmm(att.check_in)} – ${hhmm(att.check_out)}</span>` : att.check_in ? `<button class="btn small" data-a="att-out">Check out · in ${hhmm(att.check_in)}</button>` : `<button class="btn small dark" data-a="att-in">Check in</button>`}</div>
-    ${upcoming.length ? `<div class="rows my-leave">${upcoming.map(l => `<div class="r my-leave-row"><span class="num">${niceDate(l.start_date)}${l.end_date !== l.start_date ? " – " + niceDate(l.end_date) : ""}</span><span class="who muted">${(LEAVE_TYPES.find(t => t[0] === l.type) || [, l.type])[1]}</span><span class="actions" style="gap:6px"><span class="pill ${LEAVE_ST[l.status][1]}">${LEAVE_ST[l.status][0]}</span><button class="btn small icon-btn" data-a="lv-cancel" data-v="${l.id}" aria-label="Cancel leave">×</button></span></div>`).join("")}</div>` : ""}
+    ${upcoming.length ? `<div class="rows my-leave">${upcoming.map(l => `<div class="r my-leave-row"><span class="num">${niceDate(l.start_date)}${l.end_date !== l.start_date ? " – " + niceDate(l.end_date) : ""}</span><span class="who muted">${esc(l.reason || "")}</span><span class="actions" style="gap:6px"><span class="pill ${LEAVE_ST[l.status][1]}">${LEAVE_ST[l.status][0]}</span><button class="btn small icon-btn" data-a="lv-cancel" data-v="${l.id}" aria-label="Cancel leave">×</button></span></div>`).join("")}</div>` : ""}
     <div class="grid2"><label class="field">Name<input id="ac-name" value="${esc(m.name)}"></label><label class="field">${doc ? "Speciality" : "Designation"}<input id="ac-role" value="${esc((doc ? m.speciality : m.designation) || "")}"></label></div>
     <div class="grid2"><label class="field">Email<input id="ac-email" type="email" value="${esc(m.email)}"></label><label class="field">Phone<input id="ac-phone" value="${esc(m.phone || "")}"></label></div>
     <label class="field">Current password<input id="ac-cur" type="password" autocomplete="current-password"></label>
@@ -600,8 +598,7 @@ function copyInvite(code, msg) {
   navigator.clipboard?.writeText(link).then(() => toast(msg || "Invite link copied"), () => toast(link));
 }
 
-/* ---------- consultation ---------- */
-/* ---------- consultation (doctor workspace, full-screen layout) ---------- */
+/* consultation */
 const CTABS = [["brief", "Brief"], ["dictate", "Transcript"], ["note", "Note"]];
 async function viewConsult(visitId, doctorParam, patientParam) {
   const g = S.gen;
@@ -633,7 +630,7 @@ function renderConsult() {
   S.cxShown = v?.id ?? "p" + D.pid;
   const fe = $("#free-text"); if (fe && S.ft?.id === Number(fe.dataset.v)) { S.ft.sel = document.activeElement === fe ? fe.selectionEnd : null; S.ft.scroll = fe.scrollTop; }
   if (S.ft && S.ft.id !== v?.id) { saveText(S.ft.id, S.ft); S.ft = null; }
-  if (!S.ft && v && S.drafts?.[v.id] && S.drafts[v.id].saved !== S.drafts[v.id].text) S.ft = S.drafts[v.id];   // back to unsaved text
+  if (!S.ft && v && S.drafts?.[v.id] && S.drafts[v.id].saved !== S.drafts[v.id].text) S.ft = S.drafts[v.id];   // restore unsaved text
   if (S.noteVisit !== v?.id) { S.noteVisit = v?.id; S.noteEdit = false; }
   const floatMic = v && (["waiting", "with_doctor"].includes(v.status) || S.recState) && S.ctab !== "note";
   $("#root").innerHTML = `<div class="cx">
@@ -740,7 +737,6 @@ function paneNote(v) {
   if (S.noteEdit && !signed) return noteEditor(n, false);
   return soapRead(v, n);
 }
-// The note as read: S/O/A/P tiles, numbered sentences, phrases from the sources underlined.
 function soapRead(v, n, still) {
   let num = 0;
   const sec = (k, label, body) => `<div class="soap-sec"><b class="soap-tile">${k}</b><div><span class="soap-label">${label}</span><div class="soap-body">${body}</div></div></div>`;
@@ -753,12 +749,11 @@ function soapRead(v, n, still) {
   const rx = n.content.rx.filter(r => r.medicine);
   return `<div class="soap-read">${out}${rx.length ? sec("Rx", "Prescription", rx.map(r => `<div class="rx-line"><span class="nb">${++num}</span><b>${esc(r.medicine)}</b>${[r.dose, r.duration, r.instructions].filter(Boolean).map(x => ` · ${esc(x)}`).join("")}</div>`).join("")) : ""}</div>`;
 }
-// Underline the words of a sentence that come straight from its sources; clicking one opens that source.
 const STOP = new Set("a an the and or of to in on at for with by is are was were be been has have had this that it its as from no not patient patients reports reported says said complains denies looks like seems tab tablet order rule out once twice daily mg ml for since".split(" "));
 function marked(sentence, srcs, still) {
   const words = sentence.split(/(\s+)/), norm = w => w.toLowerCase().replace(/[^a-z0-9/]/g, "");
   const toks = words.map((w, i) => ({ w, i, n: /\s/.test(w) ? null : norm(w) })).filter(t => t.n !== null);
-  // Candidate phrases: up to 3 words found together in a source, trimmed of filler words; keep the 2 most telling.
+  // up to 3-word phrases shared with a source; keep the 2 best
   const cands = [];
   for (const src of srcs) {
     const hay = " " + src.text.toLowerCase().split(/\s+/).map(norm).filter(Boolean).join(" ") + " ";
@@ -853,7 +848,7 @@ function listen(visitId) {
     if (interim) putSpeech(el, interim, false);
     edit(visitId, el.value);
   };
-  // Chrome ends recognition after a silence; keep listening until the doctor pauses or stops.
+  // Chrome stops after silence; restart until the doctor stops.
   r.onend = () => { if (S.rec === r && S.recState === "on") { try { r.start(); } catch { listen(visitId); } } };
   r.onerror = e => !["no-speech", "aborted"].includes(e.error) && toast("Mic: " + e.error, true);
   S.rec = r; r.start();
@@ -874,7 +869,6 @@ async function stopMic() {
   S.dict = null; S.dictDone = id;
   await saveText(id); refreshConsult();
 }
-// Spoken words go where the cursor is. Words still being recognised are replaced as they firm up.
 function putSpeech(el, text, final) {
   const d = S.dict, before = el.value.slice(0, d.start);
   const pad = before && !/\s$/.test(before) ? " " : "";
@@ -885,15 +879,14 @@ function putSpeech(el, text, final) {
 }
 const paragraphs = text => { const out = []; let at = 0; for (const line of text.split("\n")) { if (line.trim()) out.push({ text: line.trim(), from: at, to: at + line.length }); at += line.length + 1; } return out; };
 function scheduleSave(visitId) { clearTimeout(S.ftT); S.ftT = setTimeout(() => saveText(visitId), 700); }
-// The latest text of every visit is kept in S.drafts, whichever visit is open. Each snapshot is sent based on the
-// version (rev) it was first sent on, so a late retry of an older snapshot is refused once newer text was saved.
+// Each snapshot keeps its first rev so stale retries are refused by the server.
 function edit(visitId, text) {
   const { base, tries, ...was } = S.ft?.id === visitId ? S.ft : (S.drafts?.[visitId] || {});
   S.ft = { ...was, id: visitId, text };
   (S.drafts = S.drafts || {})[visitId] = S.ft;
   scheduleSave(visitId);
 }
-// Saves for one visit run one after another.
+// Serialise saves per visit.
 function saveText(visitId, ft = S.ft) {
   clearTimeout(S.ftT);
   S.saving = S.saving || {};
@@ -902,7 +895,7 @@ function saveText(visitId, ft = S.ft) {
   return run;
 }
 async function saveOnce(visitId, ft, again) {
-  if (!ft || ft.id !== visitId || S.drafts?.[visitId] !== ft) return true;   // newer text for this visit saves itself
+  if (!ft || ft.id !== visitId || S.drafts?.[visitId] !== ft) return true;   // superseded
   if (ft.saved === ft.text) return true;
   const text = ft.text;
   S.textRev = S.textRev || {}; S.sent = S.sent || {};
@@ -913,15 +906,14 @@ async function saveOnce(visitId, ft, again) {
     S.textRev[visitId] = r.rev;
   } catch (e) {
     if (e.status === 409 && !again && S.drafts[visitId] === ft) {
-      // Maybe an earlier save from this tab reached the server but its reply was lost: if the server holds text this
-      // tab sent, the newest text continues from that version; otherwise someone else saved and theirs is kept.
+      // A lost reply may hide our own save: if the server holds text we sent, continue from it.
       const now = await api(`/visits/${visitId}`).catch(() => null);
       if (now?.text === text) { S.textRev[visitId] = now.text_rev; return done(visitId, ft, text); }
       if (now && S.sent[visitId].has(now.text)) { ft.base = now.text_rev; return saveOnce(visitId, ft, true); }
     }
     if (e.status === 409) {
       if (S.drafts[visitId] !== ft) return true;
-      // Someone saved newer text (another tab or device): show theirs rather than overwrite it.
+      // Someone else saved newer text: keep theirs.
       delete S.drafts[visitId]; if (S.ft?.id === visitId) S.ft = null;
       toast(e.message, true); refreshConsult(); return false;
     }
@@ -938,14 +930,14 @@ function done(visitId, ft, text) {
   return true;
 }
 const unsaved = () => Object.values(S.drafts || {}).some(d => d.saved !== d.text);
-// Before anything uses the text (note draft, tab change): save the visit's unsaved text; false if it couldn't be saved.
+// false if unsaved text couldn't be saved.
 const flushText = async (visitId = S.ft?.id ?? S.data?.cur?.id) => {
   const d = S.drafts?.[visitId];
   return !d || d.saved === d.text || (await saveText(visitId, d)) !== false;
 };
 window.addEventListener("beforeunload", e => { if (unsaved()) { e.preventDefault(); e.returnValue = ""; } });
 
-/* ---------- patients ---------- */
+/* patients */
 async function viewPatients(id) {
   const g = S.gen;
   S.pq = S.pq ?? "";
@@ -1010,7 +1002,7 @@ function openPatientEdit(p) {
     <div class="foot"><button class="btn primary" data-a="pe-save">Save</button></div>`);
 }
 
-/* ---------- administration ---------- */
+/* administration */
 async function viewAdmin(tab, sub) {
   const g = S.gen;
   const editable = S.me.is_admin;
@@ -1041,11 +1033,10 @@ async function viewAdmin(tab, sub) {
     <div class="actions admin-tabs">${tabs.map(([k, l]) => `<button class="btn" data-a="ad-tab" data-v="${k}" aria-pressed="${k === tab}">${l}</button>`).join("")}</div>${body}`);
 }
 
-/* ---------- administration: team & collections ---------- */
+/* team & collections */
 const TEAM_TABS = [["members", "Members"], ["today", "Today"], ["leave", "Leave"], ["register", "Register"]];
 const subTabs = (tab, cur) => `<div class="seg sub-seg">${TEAM_TABS.map(([k, l]) => `<button data-a="ad-sub" data-t="${tab}" data-v="${k}" aria-pressed="${k === cur}">${l}</button>`).join("")}</div>`;
 const ATT = { present: ["Present", "s-paid"], late: ["Late", "s-waiting"], half: ["Half day", "s-waiting"], absent: ["Absent", "s-no_show"], leave: ["Leave", "s-soft"], off: ["Off", "s-soft"], due: ["Not in yet", "s-booked"] };
-const LEAVE_TYPES = [["casual", "Casual"], ["sick", "Sick"], ["earned", "Earned"], ["other", "Other"]];
 const LEAVE_ST = { pending: ["Pending", "s-waiting"], approved: ["Approved", "s-paid"], rejected: ["Rejected", "s-no_show"], cancelled: ["Cancelled", "s-cancelled"] };
 const hhmm = ts => ts ? ts.slice(11, 16) : "—";
 const roleOf = m => m.kind === "doctor" ? (m.speciality || "Doctor") : (m.designation || "Staff");
@@ -1064,7 +1055,7 @@ async function teamView(sub) {
   }
   if (sub === "leave") {
     const ls = await api(`/leave?month=${S.adm.month}`), pend = ls.filter(l => l.status === "pending"), rest = ls.filter(l => l.status !== "pending");
-    const line = l => { const [st, c] = LEAVE_ST[l.status]; return `<div class="r leave-row">${person({ ...l, role: (LEAVE_TYPES.find(t => t[0] === l.type) || [, l.type])[1] + (l.reason ? " · " + l.reason : "") })}
+    const line = l => { const [st, c] = LEAVE_ST[l.status]; return `<div class="r leave-row">${person({ ...l, role: l.reason || "" })}
       <span class="num">${niceDate(l.start_date)}${l.end_date !== l.start_date ? " – " + niceDate(l.end_date) : ""}</span><span class="muted">${l.days} day${l.days > 1 ? "s" : ""}</span>
       <span class="actions" style="gap:6px;justify-content:flex-end">${l.status === "pending" ? `<button class="btn small dark" data-a="lv-approve" data-v="${l.id}">Approve</button><button class="btn small" data-a="lv-reject" data-v="${l.id}">Reject</button>` : `<span class="pill ${c}">${st}</span>${l.status === "approved" && l.end_date >= TODAY ? `<button class="btn small icon-btn" data-a="lv-cancel" data-v="${l.id}" aria-label="Cancel leave">×</button>` : ""}`}</span></div>`; };
     return `${subTabs("team", "leave")}<div class="bar-row">${monthPick("lvm", S.adm.month)}</div>
@@ -1120,10 +1111,9 @@ function printCollections() {
 }
 function openLeave(memberId) {
   const admin = S.me.is_admin && !memberId?.self;
-  M = { kind: "leave-new", type: "casual" };
+  M = { kind: "leave-new" };
   modal(`<h2>Leave</h2>
     ${admin ? `<label class="field">Person<select id="lv-who">${(S.members || []).filter(m => m.status === "active").map(m => `<option value="${m.id}" ${m.id === memberId ? "selected" : ""}>${esc(m.name)}</option>`).join("")}</select></label>` : ""}
-    <div class="seg" id="lv-type">${LEAVE_TYPES.map(([k, l]) => `<button data-a="lv-type" data-v="${k}" aria-pressed="${k === "casual"}">${l}</button>`).join("")}</div>
     <div class="date-row"><input class="date-pill" aria-label="From" type="date" id="lvn-from" value="${TODAY}"><input class="date-pill" aria-label="To" type="date" id="lvn-to" value="${TODAY}"></div>
     <label class="field">Reason<input id="lvn-why"></label>
     <div class="foot"><button class="btn primary" data-a="lvn-save">${S.me.is_admin ? "Save" : "Request"}</button></div>`);
@@ -1144,7 +1134,7 @@ function printRegister() {
   w.document.close();
 }
 
-/* ---------- events ---------- */
+/* events */
 document.addEventListener("click", e => {
   const t = e.target.closest("[data-a]"); if (!t) return;
   const a = t.dataset.a, v = t.dataset.v;
@@ -1274,9 +1264,8 @@ document.addEventListener("click", e => {
       case "ad-sub": go(`#/admin/${t.dataset.t}/${v}`); break;
       case "att-mark": await api(`/attendance/${t.dataset.m}/${TODAY}`, { method: "PUT", body: { status: v, check_in: v === "absent" ? null : new Date().toTimeString().slice(0, 5) } }); route(); break;
       case "lv-new": if (!S.members) S.members = await api("/members"); openLeave(); break;
-      case "lv-type": M.type = v; document.querySelectorAll('[data-a="lv-type"]').forEach(b => b.setAttribute("aria-pressed", b.dataset.v === v)); break;
       case "lvn-save": { const who = $("#lv-who")?.value;
-        const r = await api("/leave", { body: { start_date: $("#lvn-from").value, end_date: $("#lvn-to").value || $("#lvn-from").value, type: M.type, reason: $("#lvn-why").value, member_id: who ? Number(who) : null } });
+        const r = await api("/leave", { body: { start_date: $("#lvn-from").value, end_date: $("#lvn-to").value || $("#lvn-from").value, reason: $("#lvn-why").value, member_id: who ? Number(who) : null } });
         closeModal(); toast(r.status === "pending" ? "Leave requested" : r.bookings_affected ? `Leave saved · ${r.bookings_affected} booking${r.bookings_affected > 1 ? "s" : ""} to move` : "Leave saved", r.bookings_affected > 0); route(); break; }
       case "lv-approve": case "lv-reject": case "lv-cancel": { const r = await api(`/leave/${v}/${a.slice(3)}`, { body: {} });
         toast({ approve: "Approved", reject: "Rejected", cancel: "Leave cancelled" }[a.slice(3)] + (r.bookings_affected ? ` · ${r.bookings_affected} booking${r.bookings_affected > 1 ? "s" : ""} to move` : ""), r.bookings_affected > 0);
@@ -1374,7 +1363,7 @@ document.addEventListener("keydown", e => {
   if (e.key === "Escape" && M) { closeModal(); if (M === null) refresh(); }
 });
 
-/* ---------- enhancers: labels inside boxes, rounded dropdowns, calendar picker ---------- */
+/* enhancers */
 const chevron = '<svg class="dd-chev" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M7 10l5 5 5-5"/></svg>';
 const calIcon = '<svg class="dd-chev" viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15" rx="3"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>';
 function textOf(el) { return [...el.childNodes].filter(n => n.nodeType === 3).map(n => n.textContent).join("").trim(); }
@@ -1382,7 +1371,7 @@ function enhance(root) {
   root.querySelectorAll("label.field:not(.fl)").forEach(f => {
     const ctl = f.querySelector("input, select, textarea"); if (!ctl) return;
     const text = textOf(f); [...f.childNodes].forEach(n => { if (n.nodeType === 3) n.remove(); });
-    if (!text) return;   // no label: a plain pill
+    if (!text) return;
     f.classList.add("fl");
     if (!ctl.getAttribute("aria-label")) ctl.setAttribute("aria-label", text);
     const span = document.createElement("span"); span.className = "fl-label"; span.textContent = text; f.prepend(span);

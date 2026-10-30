@@ -1,4 +1,4 @@
-"""Doctor schedules: clinic hours by default, one-day overrides on top."""
+"""Clinic hours with per-day overrides."""
 import calendar
 import json
 from datetime import date as Date, timedelta
@@ -29,7 +29,6 @@ def doctor(db, me, doctor_id: int) -> dict:
 
 @router.get("/schedules/{doctor_id}")
 def month(doctor_id: int, month: str, me=Depends(current_member), db=Depends(get_db)):
-    """Every day of a month (YYYY-MM): working hours or off, and whether it was changed."""
     doctor(db, me, doctor_id)
     clinic = clinic_of(db, me)
     y, m = map(int, month.split("-"))
@@ -50,7 +49,7 @@ class Session(BaseModel):
 class Override(BaseModel):
     is_off: bool = False
     sessions: list[Session] = []
-    start: str | None = None      # older single-session form
+    start: str | None = None      # legacy single-session form
     end: str | None = None
     limit_by: str | None = Field(default=None, pattern="^(patients|minutes)$")
     limit_value: int | None = Field(default=None, ge=1)
@@ -95,13 +94,12 @@ def set_day(doctor_id: int, date: str, body: Override, me=Depends(current_member
 class Leave(BaseModel):
     start_date: str
     end_date: str
-    doctor_id: int | None = None   # empty = clinic holiday for every doctor
-    off: bool = True               # False = back to normal hours for those days
+    doctor_id: int | None = None   # None = clinic holiday
+    off: bool = True               # False = restore normal hours
 
 
 @router.post("/schedules/leave")
 def leave(body: Leave, me=Depends(current_member), db=Depends(get_db)):
-    """Leave for one doctor, or a clinic holiday for everyone, over a range of dates."""
     try:
         body.start_date, body.end_date = valid_day(body.start_date), valid_day(body.end_date)
         a, b = Date.fromisoformat(body.start_date), Date.fromisoformat(body.end_date)
@@ -127,7 +125,7 @@ def leave(body: Leave, me=Depends(current_member), db=Depends(get_db)):
                 save_day(db, me, d, day, Override(is_off=True))
             else:
                 db.execute("delete from schedule_overrides where doctor_id = ? and date = ?", (d, day))
-    if body.doctor_id:  # keep the Team → Leave list in step with the calendar
+    if body.doctor_id:  # keep Team → Leave in sync
         if body.off:
             db.execute("""insert into leave_requests (clinic_id, member_id, start_date, end_date, type, status, decided_by, decided_at, created_at)
                           values (?, ?, ?, ?, 'other', 'approved', ?, ?, ?)""",

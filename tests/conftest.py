@@ -1,6 +1,4 @@
-"""Every test run starts from an empty database: a temp SQLite file, or a wiped Postgres schema
-when TEST_DATABASE_URL points at a throwaway Postgres database. The app's real DATABASE_URL
-(from .env) is never used by tests, because the schema is dropped."""
+"""Tests drop the schema, so never point them at the real DATABASE_URL."""
 import os
 import tempfile
 

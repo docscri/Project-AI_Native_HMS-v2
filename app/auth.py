@@ -8,7 +8,7 @@ from fastapi import Depends, Header, HTTPException
 from .db import get_db, now, row
 
 SCREENS = ["operations", "patients", "consultation", "administration"]
-SESSION_HOURS = 12          # sliding: each use pushes expiry forward
+SESSION_HOURS = 12          # sliding expiry
 MAX_FAILED_LOGINS = 5
 LOCK_MINUTES = 15
 RESET_HOURS = 2
@@ -28,7 +28,7 @@ def check_password(password: str, stored: str | None) -> bool:
     parts = stored.split("$")
     if len(parts) == 4:
         _, rounds, salt, digest = parts
-    else:  # older format: salt$digest at 100k rounds
+    else:  # legacy salt$digest
         rounds, (salt, digest) = "100000", parts
     calc = hashlib.pbkdf2_hmac("sha256", password.encode(), salt.encode(), int(rounds)).hex()
     return secrets.compare_digest(calc, digest)
@@ -71,8 +71,7 @@ def public_member(m: dict) -> dict:
         m.pop(key, None)
     m["is_owner"] = bool(m["is_owner"])
     m["is_admin"] = bool(m["is_admin"] or m["is_owner"])
-    # Rules apply on every request, so older records with wrong ticks are covered too:
-    # Administration needs admin access; Consultation is for doctors only.
+    # Enforced per request so stale screen ticks can't grant access.
     m["screens"] = list(SCREENS) if m["is_owner"] else [
         x for x in json.loads(m["screens"]) if x in SCREENS
         and (x != "administration" or m["is_admin"]) and (x != "consultation" or m["kind"] == "doctor")]
@@ -88,7 +87,7 @@ def member_for_token(db, token: str) -> dict | None:
            where s.token_hash = ? and m.status = 'active'""", (token_hash(token),)).fetchone())
     if not s or s["expires_at"] < now():
         return None
-    if s["expires_at"] < later(hours=SESSION_HOURS - 0.25):  # refresh at most every 15 minutes
+    if s["expires_at"] < later(hours=SESSION_HOURS - 0.25):  # refresh at most every 15 min
         db.execute("update sessions set expires_at = ? where token_hash = ?", (later(hours=SESSION_HOURS), s["token_hash"]))
     s.pop("token_hash"), s.pop("expires_at")
     return s
@@ -110,7 +109,6 @@ def require_screen(screen: str):
 
 
 def require_any(*screens: str):
-    """Allowed if the person has at least one of these screens."""
     def check(me: dict = Depends(current_member)) -> dict:
         if not any(x in me["screens"] for x in screens):
             raise HTTPException(403, "No access.")
@@ -119,7 +117,7 @@ def require_any(*screens: str):
 
 
 def require_admin(me: dict = Depends(current_member)) -> dict:
-    """Admin actions need both admin access and the Administration screen (the owner always has both)."""
+    """Needs admin access and the Administration screen."""
     if not (me["is_admin"] and "administration" in me["screens"]):
         raise HTTPException(403, "Only an admin can change this.")
     return me

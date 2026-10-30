@@ -1,4 +1,4 @@
-"""Shared look for printable pages (note, receipt): the app's colours, Manrope, A4/A5, no lines."""
+"""Shared styling for printable pages."""
 import html
 from datetime import date, datetime
 
@@ -28,20 +28,19 @@ footer .s { color: #6B7C75; font-size: 13px; font-weight: 600; }
 footer .sign { width: 210px; text-align: center; font-size: 12px; color: #6B7C75; font-weight: 600; padding-top: 44px; background: linear-gradient(#0B1411, #0B1411) bottom 22px center / 100% 1.5px no-repeat; }
 .msg { max-width: 460px; margin: 18vh auto; background: #F6FAF7; border-radius: 28px; padding: 36px; text-align: center; }
 .msg b { display: block; font-size: 20px; margin-bottom: 6px; } .msg span { color: #6B7C75; font-weight: 600; }
-@media print { body { background: #fff; } .page { margin: 0; padding: 0; background: #fff; border-radius: 0; max-width: none; } }
+@media print { body { background: #fff; } .page { margin: 0; padding: 14mm; background: #fff; border-radius: 0; max-width: none; } }
 """
 
 
 def page(title: str, body: str, auto: bool = False, size: str = "A4", narrow: bool = False) -> str:
     return (f'<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>{html.escape(title)}</title>'
             '<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">'
-            f'<style>@page {{ size: {size}; margin: 14mm; }}{CSS}</style>'
+            f'<style>@page {{ size: {size}; margin: 0; }}{CSS}</style>'
             f'<div class="page{" narrow" if narrow else ""}">{body}</div>'
             + ('<script>onload=()=>setTimeout(print,300)</script>' if auto else ""))
 
 
 def message(title: str, text: str) -> str:
-    """A short page for links that can't be opened (expired login, not found), in the app's look."""
     return (f'<!doctype html><meta charset="utf-8"><title>{html.escape(title)}</title>'
             '<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet">'
             f'<style>{CSS}</style><div class="msg"><b>{html.escape(title)}</b><span>{html.escape(text)}</span></div>')

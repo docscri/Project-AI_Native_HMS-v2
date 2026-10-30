@@ -1,7 +1,4 @@
-"""Booking rules: a doctor's sessions on a day, how many patients fit, tokens and expected times.
-
-A day has one or more sessions (e.g. 09:00-13:00 and 17:00-20:00). Each session has its own capacity and
-token numbers, and every visit records its session by start time (visits.session_start)."""
+"""Sessions, capacity and tokens; each session numbers its own tokens."""
 import re
 import json
 from datetime import date as Date, datetime
@@ -45,7 +42,6 @@ def parse_sessions(raw, start=None, end=None) -> list[dict]:
 
 
 def valid_day(day: str | None, required: bool = True) -> str | None:
-    """A real calendar date (YYYY-MM-DD), checked before anything is saved."""
     if not day and not required:
         return None
     try:
@@ -55,7 +51,7 @@ def valid_day(day: str | None, required: bool = True) -> str | None:
 
 
 def clinic_doctor(db, me: dict, doctor_id: int) -> dict:
-    """The doctor must belong to the caller's clinic and not be deactivated; anything else looks like it doesn't exist."""
+    """Other clinics' or inactive doctors look like 404s."""
     d = db.execute("select * from members where id = ? and clinic_id = ? and kind = 'doctor' and status != 'inactive'",
                    (doctor_id, me["clinic_id"])).fetchone()
     if not d:
@@ -80,7 +76,7 @@ def validate_sessions(sessions: list[dict]) -> list[dict]:
 
 
 def day_schedule(db, clinic: dict, doctor_id: int, day: str) -> dict | None:
-    """The doctor's day: {sessions: [...], start, end, max_patients, override}, or None when off."""
+    """The doctor's day, or None when off."""
     o = row(db.execute("select * from schedule_overrides where doctor_id = ? and date = ?", (doctor_id, day)).fetchone())
     if o:
         if o["is_off"]:
@@ -162,7 +158,7 @@ def session_info(db, clinic: dict, session: dict, doctor_id: int, day: str, excl
 
 
 def availability(db, clinic: dict, doctor_id: int, day: str, exclude_visit: int | None = None, session: str | None = None) -> dict:
-    """Capacity for each session that day, plus the chosen session (asked for, or the first open one)."""
+    """Per-session capacity plus the chosen (or first open) session."""
     sched = day_schedule(db, clinic, doctor_id, day)
     if not sched:
         return {"available": False, "reason": "Doctor is off.", "sessions": []}

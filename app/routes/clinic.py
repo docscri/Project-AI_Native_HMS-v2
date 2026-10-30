@@ -1,4 +1,4 @@
-"""Login, onboarding, clinic settings and members."""
+"""Login, onboarding, settings, members."""
 import json
 import re
 
@@ -36,7 +36,6 @@ def clean_phone(phone: str | None) -> str:
 
 
 def allowed_screens(screens: list[str], kind: str, is_admin: bool) -> list[str]:
-    """Administration needs admin access; consultation is only for doctors."""
     return [x for x in screens if x in SCREENS and (x != "administration" or is_admin) and (x != "consultation" or kind == "doctor")]
 
 
@@ -49,7 +48,6 @@ def public_clinic(c: dict) -> dict:
     return c
 
 
-# ---------- auth ----------
 
 class Login(BaseModel):
     email: str
@@ -113,7 +111,7 @@ def make_reset(db, member_id: int) -> str:
 
 @router.post("/auth/forgot")
 def forgot(body: Forgot, db=Depends(get_db)):
-    """Always answers the same way so nobody can find out which emails exist."""
+    """Same answer either way, so emails can't be enumerated."""
     m = row(db.execute("select * from members where lower(email) = lower(?) and status = 'active'", (body.email.strip(),)).fetchone())
     if m:
         code = make_reset(db, m["id"])
@@ -156,13 +154,12 @@ class MyProfile(BaseModel):
     name: str = Field(min_length=1, max_length=80)
     email: str
     phone: str = ""
-    speciality: str = ""      # doctors
-    designation: str = ""     # staff
+    speciality: str = ""
+    designation: str = ""
 
 
 @router.put("/me")
 def edit_me(body: MyProfile, me=Depends(current_member), db=Depends(get_db)):
-    """Anyone can change their own details."""
     email = clean_email(body.email)
     if db.execute("select 1 from members where lower(email) = lower(?) and id != ?", (email, me["id"])).fetchone():
         raise HTTPException(409, "Email already registered.")
@@ -174,7 +171,6 @@ def edit_me(body: MyProfile, me=Depends(current_member), db=Depends(get_db)):
     return public_member(row(db.execute("select * from members where id = ?", (me["id"],)).fetchone()))
 
 
-# ---------- onboarding ----------
 
 class Owner(BaseModel):
     name: str = Field(min_length=1)
@@ -187,7 +183,7 @@ class Owner(BaseModel):
 
 @router.post("/onboarding/owner")
 def create_owner(body: Owner, db=Depends(get_db)):
-    """Step 1: the first person creates the account and becomes Owner."""
+    """Step 1: creator becomes Owner."""
     email = clean_email(body.email)
     validate_password(body.password)
     if db.execute("select 1 from members where lower(email) = lower(?)", (email,)).fetchone():
@@ -213,7 +209,6 @@ class OwnerEdit(BaseModel):
 
 @router.put("/onboarding/owner")
 def edit_owner(body: OwnerEdit, me=Depends(current_member), db=Depends(get_db)):
-    """Back to step 1 during setup: the owner can still change everything they entered."""
     if not me["is_owner"] or clinic_of(db, me)["onboarded"]:
         raise HTTPException(403, "Change this in your account.")
     email = clean_email(body.email)
@@ -237,7 +232,6 @@ class Details(BaseModel):
 
 @router.put("/clinic")
 def update_details(body: Details, me=Depends(require_admin), db=Depends(get_db)):
-    """Step 2 and Administration → Clinic details."""
     prefix = "".join(w[0] for w in body.name.split()[:3]).upper() or "CL"
     c = clinic_of(db, me)
     if c["next_uhid"] > 1:
@@ -266,7 +260,7 @@ class Rules(BaseModel):
 
 @router.put("/clinic/rules")
 def update_rules(body: Rules, me=Depends(require_admin), db=Depends(get_db)):
-    """Step 3 and Administration → Clinic rules. Defaults for every doctor."""
+    """Clinic-wide defaults for every doctor."""
     days = sorted({d for d in body.days if 0 <= d <= 6})
     if not days:
         raise HTTPException(422, "Pick at least one working day.")
@@ -295,7 +289,6 @@ def get_clinic(me=Depends(current_member), db=Depends(get_db)):
     return public_clinic(clinic_of(db, me))
 
 
-# ---------- members ----------
 
 class NewMember(BaseModel):
     kind: str = Field(pattern="^(doctor|staff)$")
@@ -320,7 +313,6 @@ def list_members(me=Depends(current_member), db=Depends(get_db)):
 
 @router.post("/members")
 def add_member(body: NewMember, me=Depends(require_admin), db=Depends(get_db)):
-    """Step 4 and Administration → Members. Returns an invite code (sent by email in a real setup)."""
     email = clean_email(body.email)
     if db.execute("select 1 from members where lower(email) = lower(?)", (email,)).fetchone():
         raise HTTPException(409, "Email already a member.")
@@ -353,7 +345,7 @@ def send_invite(db, me, member_id: int, code: str) -> bool:
 
 @router.post("/members/{member_id}/invite")
 def renew_invite(member_id: int, me=Depends(require_admin), db=Depends(get_db)):
-    """A fresh invite link (the old one stops working)."""
+    """Old invite link stops working."""
     m = row(db.execute("select * from members where id = ? and clinic_id = ?", (member_id, me["clinic_id"])).fetchone())
     if not m or m["status"] != "invited":
         raise HTTPException(409, "This person has already joined.")
@@ -364,7 +356,6 @@ def renew_invite(member_id: int, me=Depends(require_admin), db=Depends(get_db)):
 
 @router.post("/members/{member_id}/invite/email")
 def email_invite(member_id: int, me=Depends(require_admin), db=Depends(get_db)):
-    """Email the member's current invite link (the same one the admin can copy)."""
     m = row(db.execute("select * from members where id = ? and clinic_id = ?", (member_id, me["clinic_id"])).fetchone())
     if not m or m["status"] != "invited" or not m["invite_code"]:
         raise HTTPException(409, "This person has already joined.")
@@ -377,7 +368,7 @@ def email_invite(member_id: int, me=Depends(require_admin), db=Depends(get_db)):
 
 @router.post("/members/{member_id}/reset-link")
 def admin_reset_link(member_id: int, me=Depends(require_admin), db=Depends(get_db)):
-    """For staff who forgot their password when email is not set up: the admin shares this link."""
+    """Admin-shared reset link for when email is not set up."""
     m = row(db.execute("select * from members where id = ? and clinic_id = ?", (member_id, me["clinic_id"])).fetchone())
     if not m or m["status"] != "active":
         raise HTTPException(409, "Member isn't active.")
@@ -391,7 +382,6 @@ class ResetEmail(BaseModel):
 
 @router.post("/members/{member_id}/reset-link/email")
 def email_reset_link(member_id: int, body: ResetEmail, me=Depends(require_admin), db=Depends(get_db)):
-    """Email the reset link the admin just made, so copying and emailing share one link."""
     m = row(db.execute("select * from members where id = ? and clinic_id = ? and status = 'active'", (member_id, me["clinic_id"])).fetchone())
     ok = m and db.execute("select 1 from password_resets where token_hash = ? and member_id = ? and used_at is null and expires_at > ?",
                           (token_hash(body.code), member_id, now())).fetchone()
@@ -465,7 +455,7 @@ def update_member(member_id: int, body: MemberUpdate, me=Depends(require_admin),
     if body.clear_fee:
         changes["fee_override"] = None
     if body.status == "active" and m["status"] == "invited":
-        changes.pop("status")  # invited members become active by accepting
+        changes.pop("status")  # only accepting activates an invite
     if changes:
         db.execute(f"update members set {', '.join(f'{k} = ?' for k in changes)} where id = ?", (*changes.values(), member_id))
     if changes.get("status") == "inactive":
@@ -476,7 +466,7 @@ def update_member(member_id: int, body: MemberUpdate, me=Depends(require_admin),
 
 @router.delete("/members/{member_id}")
 def remove_member(member_id: int, me=Depends(require_admin), db=Depends(get_db)):
-    """Removes a member. Anyone with visit or note history is deactivated instead, so records stay intact."""
+    """Members with history are deactivated, not deleted."""
     m = row(db.execute("select * from members where id = ? and clinic_id = ?", (member_id, me["clinic_id"])).fetchone())
     if not m:
         raise HTTPException(404, "Member not found.")

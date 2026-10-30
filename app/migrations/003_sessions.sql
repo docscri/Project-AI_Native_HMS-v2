@@ -1,4 +1,4 @@
--- A doctor's day can have several sessions (e.g. morning and evening). Tokens restart in each session.
+-- Tokens restart in each session.
 
 alter table clinics add column sessions text;
 alter table schedule_overrides add column sessions text;

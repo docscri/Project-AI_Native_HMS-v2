@@ -1,18 +1,17 @@
-"""Settings come from environment variables, or from a .env file next to run.py."""
+"""Settings from environment variables or .env."""
 from pathlib import Path
 
 try:
     from dotenv import load_dotenv
 
     load_dotenv(Path(__file__).resolve().parent.parent / ".env")
-except ImportError:  # python-dotenv not installed: environment variables still work
+except ImportError:  # dotenv is optional
     pass
 
-# Clinic time zone: "today", check-in times, receipts and sessions use local clinic time.
-# Hosting servers run on UTC, so default to India unless CLINIC_TZ says otherwise.
+# Servers run on UTC; "today" and times must be clinic-local.
 import os as _os
 import time as _time
 
 _os.environ["TZ"] = _os.environ.get("CLINIC_TZ") or "Asia/Kolkata"
-if hasattr(_time, "tzset"):  # Linux / Mac servers; on Windows the laptop's own time zone is used
+if hasattr(_time, "tzset"):  # not on Windows
     _time.tzset()

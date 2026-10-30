@@ -1,4 +1,4 @@
-"""AI helpers. Uses Gemini when GEMINI_API_KEY is set; otherwise simple offline drafts so the demo always works."""
+"""Gemini when GEMINI_API_KEY is set, else offline drafts."""
 import base64
 import json
 import os
@@ -29,7 +29,6 @@ def _gemini(parts: list[dict]) -> dict:
     return json.loads(r.json()["candidates"][0]["content"]["parts"][0]["text"])
 
 
-# ---------- documents ----------
 
 def extract_document(data: bytes, mime: str, filename: str) -> dict:
     """Returns {"summary": str, "findings": [{"name", "value", "unit"}]}."""
@@ -41,10 +40,9 @@ def extract_document(data: bytes, mime: str, filename: str) -> dict:
     return {"summary": text[:300] or f"Uploaded document: {filename}", "findings": findings}
 
 
-# ---------- evidence ----------
 
 def evidence(text: str, documents: list[dict], past_notes: list[dict]) -> list[dict]:
-    """Everything the AI may use, each with a stable id it must cite. The free text is cited by paragraph (T1, T2...)."""
+    """Citable sources with stable ids; free text cited by paragraph (T1, T2...)."""
     paras = [p.strip() for p in re.split(r"\n+", text or "") if p.strip()]
     items = [{"id": f"T{i + 1}", "kind": "transcript", "text": p} for i, p in enumerate(paras)]
     for d in documents:
@@ -63,10 +61,9 @@ def _keep_known(cites, known: set[str]) -> list[str]:
     return [c for c in (cites or []) if c in known]
 
 
-# ---------- brief ----------
 
 def brief(patient: dict, items: list[dict]) -> dict:
-    """{"items": [{"text", "cites", "flag"}]} — the doctor's 30-second summary."""
+    """{"items": [{"text", "cites", "flag"}]}"""
     known = {i["id"] for i in items if i["kind"] != "transcript"}
     usable = [i for i in items if i["kind"] != "transcript"]
     if not usable:
@@ -90,7 +87,6 @@ def brief(patient: dict, items: list[dict]) -> dict:
     return {"items": result[:6]}
 
 
-# ---------- notes ----------
 
 MED = re.compile(r"\b([A-Z][a-zA-Z]+(?:\s+syrup)?)\s+(\d+(?:\.\d+)?\s*(?:mg|ml|mcg|g))\b", re.I)
 FREQ = re.compile(r"\b(once|twice|three times|thrice|four times)\s+(?:a\s+day|daily)|\b\d-\d-\d\b|\bevery\s+\d+\s+hours\b", re.I)
@@ -104,7 +100,6 @@ def draft_note(patient: dict, items: list[dict]) -> dict:
         out = _gemini([{"text": _prompt("note.txt") + "\n\nPATIENT: " + json.dumps(patient) + "\n\nEVIDENCE:\n" + json.dumps(items)}])
         out["citations"] = {k: _keep_known(v, known) for k, v in (out.get("citations") or {}).items()}
         return out
-    # Offline draft: sort what was said into SOAP by simple cues.
     soap = {"S": [], "O": [], "A": [], "P": []}
     cites = {"S": [], "O": [], "A": [], "P": []}
     rx = []

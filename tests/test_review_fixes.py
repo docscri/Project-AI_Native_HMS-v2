@@ -1,4 +1,4 @@
-"""Regression tests for the review findings (list A)."""
+"""Regression tests."""
 from datetime import date, timedelta
 
 from fastapi.testclient import TestClient
@@ -62,11 +62,10 @@ def test_3_and_4_signer_recorded_and_signed_note_cannot_change():
         assert signed["signed_by_name"] == "Dr. B"
         page = c.get(f"/api/notes/{n['id']}/print", params={"token": b["Authorization"].split()[1]}).text
         assert "Signed by Dr. B" in page
-        # an edit or a second signature arriving after signing is refused, and the content is unchanged
         assert c.put(f"/api/notes/{n['id']}", headers=h, json={"soap": {"S": "late edit", "O": "", "A": "", "P": ""}, "rx": []}).status_code == 409
         assert c.post(f"/api/notes/{n['id']}/sign", headers=h).status_code == 409
         assert c.get(f"/api/visits/{v['id']}", headers=h).json()["note"]["content"]["soap"]["S"] == ""
-        # the write itself checks the status (not just the earlier read): simulate the race
+        # simulate the race past the earlier read
         db = connect()
         assert db.execute("update notes set content = 'x' where id = ? and status = 'draft'", (n["id"],)).rowcount == 0
         db.close()

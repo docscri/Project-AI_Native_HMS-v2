@@ -1,5 +1,3 @@
--- Payments: discount or waiver with a reason, receipt numbers, refunds.
--- Queue: manual order and a "running late" flag.
 
 alter table visits add column discount integer not null default 0;
 alter table visits add column discount_reason text;

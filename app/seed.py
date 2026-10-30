@@ -1,9 +1,4 @@
-"""Demo data: one clinic, two doctors, two staff, patients, two weeks of visits and notes, today's queue,
-payments, attendance and leave.
-
-Run: python -m app.seed   (only seeds an empty database)
-Logins (password demo123): anjali@demo.in (owner, doctor) · rahul@demo.in (doctor) · meera@demo.in (receptionist) · tess@demo.in (nurse)
-"""
+"""Demo data (empty DB only). Logins: anjali/rahul/meera/tess@demo.in, password demo123."""
 import json
 import os
 import random
@@ -14,7 +9,7 @@ from .db import connect, init, now
 
 
 def _session_today() -> tuple[str, str]:
-    """Today's demo session always includes the current time, so the queue is live whenever you open it."""
+    """Session spans now, so the demo queue is always live."""
     h = max(0, min(datetime.now().hour - 1, 19))
     return f"{h:02d}:00", f"{min(h + 4, 23):02d}:{'00' if h + 4 <= 23 else '59'}"
 
@@ -42,7 +37,7 @@ def seed() -> bool:
     rahul = member("doctor", "Dr. Rahul Nair", "rahul@demo.in", ["patients", "consultation"], spec="Paediatrics", fee=400)
     meera = member("staff", "Meera Joseph", "meera@demo.in", ["operations", "patients"], desig="Receptionist")
     tess = member("staff", "Tess Mathew", "tess@demo.in", ["operations"], desig="Nurse")
-    # Your own login inside the demo clinic (Render: set DEMO_EMAIL, and optionally DEMO_PASSWORD and DEMO_NAME)
+    # Optional login from DEMO_EMAIL / DEMO_PASSWORD / DEMO_NAME
     own = os.environ.get("DEMO_EMAIL", "").strip().lower()
     if own and own not in ("anjali@demo.in", "rahul@demo.in", "meera@demo.in", "tess@demo.in"):
         db.execute(
@@ -87,7 +82,6 @@ def seed() -> bool:
             (cid, pid[p], doc, day, start if day == today else "09:00", token, status, fee, method or (paid and "upi"),
              paid, paid, fee if paid else None, receipt[0] if paid else None, token)).lastrowid
 
-    # Suresh's earlier visit with a signed note and a lab report
     old = visit("Suresh Pillai", anjali, 4, "done", day="2026-03-12", method="cash")
     db.execute("insert into notes (clinic_id, patient_id, visit_id, doctor_id, content, citations, status, signed_at) values (?, ?, ?, ?, ?, '{}', 'signed', ?)",
                (cid, pid["Suresh Pillai"], old, anjali, json.dumps({
@@ -108,7 +102,6 @@ def seed() -> bool:
     visit("Aarav Nair", rahul, 1, "waiting")
     visit("Nisha Thomas", rahul, 2, "booked")
 
-    # A lab report already read by the AI, attached to today's visit
     from .db import UPLOAD_DIR
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     path = UPLOAD_DIR / "seed-blood-report.txt"
@@ -120,7 +113,6 @@ def seed() -> bool:
                    "findings": [{"name": "HbA1c", "value": "8.9", "unit": "%"}, {"name": "Fasting glucose", "value": "168", "unit": "mg/dL"},
                                 {"name": "Creatinine", "value": "1.0", "unit": "mg/dL"}]})))
     history(db, cid, anjali, rahul, meera, tess, pid, receipt)
-    # payment history rows for every demo payment and refund, taken at the front desk
     db.execute("""insert into payments (clinic_id, visit_id, kind, amount, method, receipt_no, at, by_member)
                   select clinic_id, id, 'payment', coalesce(amount_paid, 0), payment_method, receipt_no, paid_at, ? from visits where clinic_id = ? and paid_at is not null""", (tess, cid))
     db.execute("""insert into payments (clinic_id, visit_id, kind, amount, reason, at, by_member)
@@ -147,13 +139,12 @@ NOTES = [
 
 
 def history(db, cid, anjali, rahul, meera, tess, pid, receipt):
-    """Two weeks of finished visits with signed notes and payments, attendance, leave and a waitlist."""
     rnd = random.Random(7)
     today = date.today()
     patients = list(pid.values())
     for back in range(14, 0, -1):
         d = today - timedelta(days=back)
-        if d.isoweekday() == 7:   # clinic closed on Sundays
+        if d.isoweekday() == 7:   # closed Sundays
             continue
         day = d.isoformat()
         for doc, fee in ((anjali, 300), (rahul, 400)):
@@ -178,7 +169,6 @@ def history(db, cid, anjali, rahul, meera, tess, pid, receipt):
                     db.execute("""insert into notes (clinic_id, patient_id, visit_id, doctor_id, content, citations, status, signed_at)
                                   select clinic_id, patient_id, id, doctor_id, ?, '{}', 'signed', ? from visits where id = ?""",
                                (json.dumps({"soap": {"S": s_, "O": o, "A": a, "P": p}, "rx": rx}), at, vid))
-        # staff attendance: mostly on time, sometimes late, the odd absence
         for m, start in ((meera, 9), (tess, 9)):
             r = rnd.random()
             if r < .08:
@@ -187,7 +177,6 @@ def history(db, cid, anjali, rahul, meera, tess, pid, receipt):
             db.execute("insert into attendance (clinic_id, member_id, date, status, check_in, check_out) values (?, ?, ?, ?, ?, ?)",
                        (cid, m, day, "late" if late else "present", f"{day}T{start:02d}:{25 if late else 2}:00", f"{day}T17:{rnd.randint(0, 40):02d}:00"))
     db.execute("update visits set refund_amount = 100, refund_reason = 'Charged twice', refunded_at = paid_at where id = (select min(id) from visits where status = 'done' and date < ?)", (today.isoformat(),))
-    # Meera is in today; Tess asked for sick leave; Rahul's day off is recorded as leave
     db.execute("insert into attendance (clinic_id, member_id, date, status, check_in) values (?, ?, ?, 'present', ?)", (cid, meera, today.isoformat(), f"{today.isoformat()}T08:56:00"))
     later = (today + timedelta(days=4)).isoformat()
     db.execute("""insert into leave_requests (clinic_id, member_id, start_date, end_date, type, reason, status, created_at)

@@ -1,9 +1,8 @@
--- Team: profile details, leave, attendance. Money: day close.
 alter table members add column joined_on text;
 alter table members add column emergency_contact text not null default '';
 alter table members add column address text not null default '';
 alter table members add column id_number text not null default '';
-alter table members add column work_days text;        -- staff: JSON weekdays [0..6]; empty = clinic days
+alter table members add column work_days text;        -- JSON weekdays; empty = clinic days
 alter table members add column work_start text;       -- staff: usual start, e.g. 09:00
 alter table members add column work_end text;
 

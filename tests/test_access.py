@@ -1,4 +1,4 @@
-"""Server-side screen rules: who may read clinical data, edit patients and change admin settings."""
+"""Server-side screen rules."""
 import json
 
 from fastapi.testclient import TestClient
@@ -27,23 +27,19 @@ def test_screen_rules_on_the_server():
         n = c.post(f"/api/visits/{v['id']}/note/draft", headers=h).json()
         up = c.post(f"/api/visits/{v['id']}/documents", headers=rh, files={"file": ("r.txt", b"HbA1c 7.1 %", "text/plain")}).json()
         rtok = rh["Authorization"].split()[1]
-        # 1, 2: front desk can't read clinical data, but can upload and print receipts
         assert c.get(f"/api/visits/{v['id']}", headers=rh).status_code == 403
         assert c.get(f"/api/documents/{up['id']}/file", headers=rh).status_code == 403
         assert c.get(f"/api/notes/{n['id']}/print", params={"token": rtok}).status_code == 403
         assert c.get(f"/api/visits/{v['id']}/receipt", params={"token": rtok}).status_code == 200
         assert c.get(f"/api/visits/{v['id']}", headers=h).status_code == 200
-        # 3: editing patients needs Operations or Patients
         _, dh = join(c, h, "Dr. C", "dc@x.in", "doctor", ["consultation"])
         assert c.patch(f"/api/patients/{p['id']}", headers=dh, json={"phone": "9847000000"}).status_code == 403
         assert c.patch(f"/api/patients/{p['id']}", headers=rh, json={"phone": "9847000000"}).status_code == 200
         assert c.get("/api/patients", headers=dh, params={"q": "Pat"}).status_code == 200
-        # 4: admin actions need admin access and the Administration screen
         _, ah = join(c, h, "Admin No Screen", "ans@x.in", "staff", ["operations"], admin=True)
         assert c.put("/api/clinic", headers=ah, json={"name": "X"}).status_code == 403
         _, bh = join(c, h, "Admin", "adm@x.in", "staff", ["operations", "administration"], admin=True)
         assert c.put("/api/clinic", headers=bh, json={"name": "Clinic B"}).status_code == 200
-        # 5: older records with wrong ticks are cleaned on every request
         sid, sh = join(c, h, "Old Staff", "old@x.in", "staff", ["operations"])
         db = connect()
         db.execute("update members set screens = ? where id = ?", (json.dumps(["operations", "consultation", "administration"]), sid))

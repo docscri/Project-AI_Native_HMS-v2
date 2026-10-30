@@ -1,28 +1,20 @@
-"""Rebuild the payment history of visits from before the ledger, using each visit's event log.
-
-Migration 010 imported one payment and one refund per visit from the visit's final columns, so an old
-pay -> undo -> pay visit looked fully refunded (and 011 only repaired balances below zero). The event log
-recorded every payment, undo and refund as it happened. Each imported visit's history is rebuilt from it and
-checked against the visit's columns; only a history that adds up replaces the import. Any other visit keeps
-its imported rows and gets a 'ledger_review' event saying why, for someone to check by hand.
-"""
+"""Rebuild pre-ledger payment history from event logs; unreconcilable visits get a ledger_review event."""
 import json
 from datetime import datetime
 
 
 def rebuild(visit: dict, events: list) -> tuple[list, str | None]:
-    """The visit's payments and refunds in order, or the reason they can't be trusted."""
     out, refunded, held, holding = [], 0, 0, False
     for e in events:
         action, at, d = e["action"], e["at"], json.loads(e["data"]) if e["data"] else {}
         if action == "walk_in" and d.get("paid") is not None:
-            # Walk-ins can't be undone, so the visit still holds this payment's method and receipt.
+            # Walk-ins can't be undone, so the visit columns are authoritative.
             out.append(("payment", d["paid"], visit["payment_method"], visit["receipt_no"], None, visit["paid_at"] or at))
             held, holding = held + d["paid"], True
         elif action == "waiting" and d.get("amount_paid") is not None:
             out.append(("payment", d["amount_paid"], d.get("payment_method"), d.get("receipt_no"), None, d.get("paid_at") or at))
             held, holding = held + d["amount_paid"], True
-        elif action == "booked" and d.get("refund_amount") is not None:   # arrival undone: refund_amount is the running total
+        elif action == "booked" and d.get("refund_amount") is not None:   # refund_amount is a running total
             amount = d["refund_amount"] - refunded
             if amount < 0:
                 return out, "undo refund total went down"
@@ -65,7 +57,7 @@ def run(db) -> None:
                         datetime.now().isoformat(timespec="seconds")))
             continue
         if mixed:
-            continue   # already matches
+            continue
         db.execute("delete from payments where visit_id = ? and by_member is null", (vid,))
         for kind, amount, method, receipt, reason, at in rows:
             db.execute("insert into payments (clinic_id, visit_id, kind, amount, method, receipt_no, reason, at) values (?, ?, ?, ?, ?, ?, ?, ?)",

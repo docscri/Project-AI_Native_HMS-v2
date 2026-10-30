@@ -1,4 +1,4 @@
-"""Login security: sessions, lockout, password change and reset, invite expiry."""
+"""Login security."""
 from fastapi.testclient import TestClient
 
 from app import db as dbm
@@ -129,9 +129,9 @@ def test_admin_reset_and_invite_links_can_be_emailed_or_copied(monkeypatch):
         inv = c.post("/api/members", headers=h, json={"name": "Nina", "email": "nina@x.in", "kind": "staff", "screens": ["operations"]}).json()
         sent.clear()
         r = c.post(f"/api/members/{inv['id']}/invite", headers=h).json()
-        assert r["email_enabled"] is True and not sent           # making a link doesn't email by itself
+        assert r["email_enabled"] is True and not sent
         c.post(f"/api/members/{inv['id']}/invite/email", headers=h)
-        assert sent and r["invite_code"] in sent[-1][2]          # the emailed link is the same one
+        assert sent and r["invite_code"] in sent[-1][2]
         c.post("/api/invites/accept", json={"code": r["invite_code"], "password": "nina1234"})
         link = c.post(f"/api/members/{inv['id']}/reset-link", headers=h).json()
         c.post(f"/api/members/{inv['id']}/reset-link/email", headers=h, json={"code": link["code"]})

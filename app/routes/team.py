@@ -1,4 +1,4 @@
-"""Team (attendance, leave, monthly register) and Collections (money in, refunds, day close)."""
+"""Attendance, leave, register and collections."""
 import calendar
 import re
 import json
@@ -24,7 +24,6 @@ def members_of(db, clinic_id: int) -> list[dict]:
 
 
 def leave_days(db, clinic_id: int, start: str, end: str) -> dict[tuple[int, str], dict]:
-    """(member_id, day) -> approved leave covering that day."""
     out = {}
     for l in rows(db.execute(
             "select * from leave_requests where clinic_id = ? and status = 'approved' and start_date <= ? and end_date >= ?",
@@ -37,7 +36,6 @@ def leave_days(db, clinic_id: int, start: str, end: str) -> dict[tuple[int, str]
 
 
 def works_on(db, clinic: dict, m: dict, day: str) -> tuple[bool, str | None]:
-    """Is this person expected at work that day, and from what time."""
     if m["kind"] == "doctor":
         s = day_schedule(db, clinic, m["id"], day)
         return (s is not None, s and s["start"])
@@ -64,13 +62,13 @@ def day_status(db, clinic, m, day, att, leave) -> dict:
     elif day < Date.today().isoformat():
         st = "absent"
     else:
-        st = "due"          # expected today, not checked in yet
+        st = "due"          # not checked in yet
     return {"status": st, "working": working, "start": start,
             "check_in": a and a["check_in"], "check_out": a and a["check_out"], "note": a and a["note"]}
 
 
 def attendance_on(db, clinic_id: int, start: str, end: str) -> dict:
-    """Recorded attendance, plus doctors who saw patients that day (counted present from their first consultation)."""
+    """Doctors who consulted count as present."""
     out = {(a["member_id"], a["date"]): a for a in rows(db.execute(
         "select * from attendance where clinic_id = ? and date between ? and ?", (clinic_id, start, end)))}
     for v in rows(db.execute(
@@ -81,11 +79,9 @@ def attendance_on(db, clinic_id: int, start: str, end: str) -> dict:
 
 
 def since(m: dict) -> str:
-    """First day someone can be counted: their joining date, or when they were added."""
     return m["joined_on"] or (m["created_at"] or "")[:10]
 
 
-# ---------- attendance ----------
 
 @router.get("/team/today")
 def team_today(date: str | None = None, me=Depends(require_admin), db=Depends(get_db)):
@@ -131,7 +127,6 @@ class Mark(BaseModel):
 
 @router.put("/attendance/{member_id}/{date}")
 def mark(member_id: int, date: str, body: Mark, me=Depends(require_admin), db=Depends(get_db)):
-    """Admin marks or corrects someone's day."""
     date = valid_day(date)
     if body.check_in and not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", body.check_in):
         raise HTTPException(422, "Use times like 09:30.")
@@ -154,7 +149,7 @@ def mark(member_id: int, date: str, body: Mark, me=Depends(require_admin), db=De
 
 @router.get("/team/register")
 def register(month: str, member_id: int | None = None, me=Depends(current_member), db=Depends(get_db)):
-    """Monthly working-days sheet. Admins see everyone; others see themselves."""
+    """Non-admins see only themselves."""
     if not me["is_admin"]:
         member_id = me["id"]
     y, mo = map(int, month.split("-"))
@@ -183,18 +178,16 @@ def register(month: str, member_id: int | None = None, me=Depends(current_member
     return {"month": month, "people": out}
 
 
-# ---------- leave ----------
 
 class LeaveIn(BaseModel):
     start_date: str
     end_date: str
     type: str = Field(default="casual", pattern="^(casual|sick|earned|other)$")
     reason: str = ""
-    member_id: int | None = None     # admins may add leave for anyone
+    member_id: int | None = None     # admins only
 
 
 def apply_doctor_leave(db, me, member_id: int, start: str, end: str, off: bool) -> None:
-    """A doctor's approved leave blocks booking on those days."""
     m = row(db.execute("select kind from members where id = ?", (member_id,)).fetchone())
     if not m or m["kind"] != "doctor":
         return
@@ -254,7 +247,7 @@ def leave_one(db, me, lid: int) -> dict:
 
 @router.get("/leave")
 def list_leave(month: str | None = None, mine: bool = False, me=Depends(current_member), db=Depends(get_db)):
-    """Pending requests and the leave that touches a month. Non-admins only see their own."""
+    """Non-admins see only their own."""
     where, args = "l.clinic_id = ?", [me["clinic_id"]]
     if mine or not me["is_admin"]:
         where += " and l.member_id = ?"
@@ -291,10 +284,8 @@ def decide(leave_id: int, action: str, me=Depends(current_member), db=Depends(ge
     return leave_one(db, me, leave_id) | {"bookings_affected": bookings_between(db, l["member_id"], l["start_date"], l["end_date"]) if action == "approve" else 0}
 
 
-# ---------- collections ----------
 
 def money_rows(db, me, kind: str, start: str, end: str, doctor_id: int | None) -> list[dict]:
-    """Payments or refunds made in a date range, from the payment history (one row each)."""
     doc = " and v.doctor_id = ?" if doctor_id else ""
     return rows(db.execute(
         f"""select pay.id as pay_id, v.id, v.date, pay.at, pay.at as paid_at, pay.at as refunded_at, pay.method as payment_method,
@@ -329,7 +320,7 @@ def collections(start: str, end: str | None = None, doctor_id: int | None = None
         if t["visits"] or t["refunded"]:
             days.append({"date": k, **t})
         d += timedelta(days=1)
-    # Per doctor: patients by visit date, money by payment date (same as the totals above).
+    # Patients by visit date, money by payment date.
     vis = rows(db.execute(
         f"""select v.doctor_id, v.status, v.is_walk_in from visits v where v.clinic_id = ? and v.date between ? and ?{doc}""",
         (me["clinic_id"], start, end, *extra)))
