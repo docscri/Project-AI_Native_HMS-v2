@@ -729,7 +729,7 @@ function paneDictate(v) {
   const n = v.note, can = v.status === "with_doctor" && n?.status !== "signed";
   return `<textarea class="live-text live-edit" id="free-text" data-a="free-text" data-v="${v.id}" spellcheck="true" aria-label="Transcript" ${can ? "" : "readonly"}>${esc(freeText(v))}</textarea>`;
 }
-const freeText = v => S.ft?.id === v.id ? S.ft.text : (v.text || "");
+const freeText = v => S.ft?.id === v.id ? S.ft.text : S.drafts?.[v.id]?.saved !== S.drafts?.[v.id]?.text ? S.drafts[v.id].text : (v.text || "");
 const SOAP = [["S", "Subjective"], ["O", "Objective"], ["A", "Assessment"], ["P", "Plan"]];
 function paneNote(v) {
   const n = v.note, signed = n?.status === "signed";
@@ -849,8 +849,7 @@ function listen(visitId) {
       if (e.results[i].isFinal) { if (said) putSpeech(el, said + " ", true); } else interim += (interim ? " " : "") + said;
     }
     if (interim) putSpeech(el, interim, false);
-    S.ft = { ...(S.ft?.id === visitId ? S.ft : {}), id: visitId, text: el.value };
-    scheduleSave(visitId);
+    edit(visitId, el.value);
   };
   // Chrome ends recognition after a silence; keep listening until the doctor pauses or stops.
   r.onend = () => { if (S.rec === r && S.recState === "on") { try { r.start(); } catch { listen(visitId); } } };
@@ -884,8 +883,15 @@ function putSpeech(el, text, final) {
 }
 const paragraphs = text => { const out = []; let at = 0; for (const line of text.split("\n")) { if (line.trim()) out.push({ text: line.trim(), from: at, to: at + line.length }); at += line.length + 1; } return out; };
 function scheduleSave(visitId) { clearTimeout(S.ftT); S.ftT = setTimeout(() => saveText(visitId), 700); }
-// Saves for one visit run one after another, each based on the last saved version (rev).
-// A retry of an older snapshot is dropped once newer text exists, and the server refuses out-of-date versions.
+// The latest text of every visit is kept in S.drafts, whichever visit is open. Each snapshot is sent based on the
+// version (rev) it was first sent on, so a late retry of an older snapshot is refused once newer text was saved.
+function edit(visitId, text) {
+  const { base, tries, ...was } = S.ft?.id === visitId ? S.ft : (S.drafts?.[visitId] || {});
+  S.ft = { ...was, id: visitId, text };
+  (S.drafts = S.drafts || {})[visitId] = S.ft;
+  scheduleSave(visitId);
+}
+// Saves for one visit run one after another.
 function saveText(visitId, ft = S.ft) {
   clearTimeout(S.ftT);
   S.saving = S.saving || {};
@@ -894,39 +900,42 @@ function saveText(visitId, ft = S.ft) {
   return run;
 }
 async function saveOnce(visitId, ft, again) {
-  const newest = S.ft?.id === visitId ? S.ft : ft;
-  if (newest !== ft && newest.text !== ft.text) { S.failed?.delete(ft); return true; }   // newer text will save itself
-  if (!ft || ft.id !== visitId || ft.saved === ft.text) return true;
+  if (!ft || ft.id !== visitId || S.drafts?.[visitId] !== ft) return true;   // newer text for this visit saves itself
+  if (ft.saved === ft.text) return true;
   const text = ft.text;
   S.textRev = S.textRev || {}; S.sent = S.sent || {};
+  if (ft.base == null) ft.base = S.textRev[visitId] ?? 0;
   (S.sent[visitId] = S.sent[visitId] || new Set()).add(text);
   try {
-    const r = await api(`/visits/${visitId}/text`, { method: "PUT", body: { text, rev: S.textRev[visitId] ?? null } });
+    const r = await api(`/visits/${visitId}/text`, { method: "PUT", body: { text, rev: ft.base } });
     S.textRev[visitId] = r.rev;
   } catch (e) {
-    if (e.status === 409 && !again) {
-      // Maybe our own earlier save reached the server but its reply was lost: if the server holds text this tab sent,
-      // continue from that version; otherwise someone else saved newer text and theirs is kept.
+    if (e.status === 409 && !again && S.drafts[visitId] === ft) {
+      // Maybe an earlier save from this tab reached the server but its reply was lost: if the server holds text this
+      // tab sent, the newest text continues from that version; otherwise someone else saved and theirs is kept.
       const now = await api(`/visits/${visitId}`).catch(() => null);
-      if (now && S.sent[visitId].has(now.text)) { S.textRev[visitId] = now.text_rev; return saveOnce(visitId, ft, true); }
+      if (now?.text === text) { S.textRev[visitId] = now.text_rev; return done(visitId, ft, text); }
+      if (now && S.sent[visitId].has(now.text)) { ft.base = now.text_rev; return saveOnce(visitId, ft, true); }
     }
     if (e.status === 409) {
+      if (S.drafts[visitId] !== ft) return true;
       // Someone saved newer text (another tab or device): show theirs rather than overwrite it.
-      S.failed?.delete(ft); if (S.ft?.id === visitId) S.ft = null;
+      delete S.drafts[visitId]; if (S.ft?.id === visitId) S.ft = null;
       toast(e.message, true); refreshConsult(); return false;
     }
     toast(`Not saved · ${e.message}`, true);
-    S.failed = S.failed || new Set(); S.failed.add(ft);
     ft.tries = (ft.tries || 0) + 1;
     if (ft.tries < 6) setTimeout(() => saveText(visitId, ft), 5000);
     return false;
   }
-  ft.saved = text; ft.tries = 0; S.failed?.delete(ft);
-  if (S.ft?.id === visitId && S.ft.text === text) S.ft.saved = text;
-  if (S.data?.cur?.id === visitId) S.data.cur.text = text;
+  return done(visitId, ft, text);
+}
+function done(visitId, ft, text) {
+  ft.saved = text; ft.tries = 0;
+  if (S.drafts[visitId] === ft && S.data?.cur?.id === visitId) S.data.cur.text = text;
   return true;
 }
-const unsaved = () => !!S.failed?.size || (!!S.ft && S.ft.saved !== S.ft.text && S.ft.text !== (S.data?.cur?.id === S.ft.id ? S.data.cur.text : undefined));
+const unsaved = () => Object.values(S.drafts || {}).some(d => d.saved !== d.text);
 const flushText = async () => !S.ft || (await saveText(S.ft.id)) !== false;
 window.addEventListener("beforeunload", e => { if (unsaved()) { e.preventDefault(); e.returnValue = ""; } });
 
@@ -1334,7 +1343,7 @@ document.addEventListener("input", e => {
   const a = e.target.dataset?.a;
   if (a === "bk-q") searchPatients(e.target.value);
   if (a === "pay-disc") payShow();
-  if (a === "free-text") { const id = Number(e.target.dataset.v); S.ft = { ...(S.ft?.id === id ? S.ft : {}), id, text: e.target.value }; if (S.dict) S.dict = { start: e.target.selectionEnd, len: 0 }; scheduleSave(id); }
+  if (a === "free-text") { if (S.dict) S.dict = { start: e.target.selectionEnd, len: 0 }; edit(Number(e.target.dataset.v), e.target.value); }
   if (a === "up-file") { const f = e.target.files[0]; $("#up-name").textContent = f ? f.name : "No file"; $(".file-drop").classList.toggle("has", !!f); }
   if (a === "mg-q") { M.q = e.target.value; clearTimeout(searchT); searchT = setTimeout(() => run(async () => { if (M?.kind !== "merge") return; M.results = M.q.trim() ? await api(`/patients?q=${encodeURIComponent(M.q)}`) : []; renderMerge(); }), 180); }
   if (a === "vf-q") { S.vf.q = e.target.value; const r = $("#ops-rows"); if (r && S.data?.visits) r.innerHTML = opsRows(S.data.visits); }

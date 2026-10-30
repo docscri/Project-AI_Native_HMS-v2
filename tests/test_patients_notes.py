@@ -65,16 +65,16 @@ def test_free_text_space():
         h, doc = owner(c, "free@x.in")
         p = c.post("/api/patients", headers=h, json={"consent": True, "name": "Free Text"}).json()
         v = c.post("/api/visits/walk-in", headers=h, json={"patient_id": p["id"], "doctor_id": doc, "payment_method": "cash"}).json()
-        assert c.put(f"/api/visits/{v['id']}/text", headers=h, json={"text": "x"}).status_code == 409
+        assert c.put(f"/api/visits/{v['id']}/text", headers=h, json={"text": "x", "rev": 0}).status_code == 409
         c.post(f"/api/visits/{v['id']}/start", headers=h)
         text = "Fever and cough since Monday.\nTemp 101 F, BP 120/80.\nLooks like viral fever. Paracetamol 650 mg twice daily for 3 days."
-        assert c.put(f"/api/visits/{v['id']}/text", headers=h, json={"text": text}).status_code == 200
+        assert c.put(f"/api/visits/{v['id']}/text", headers=h, json={"text": text, "rev": 0}).status_code == 200
         assert c.get(f"/api/visits/{v['id']}", headers=h).json()["text"] == text
         n = c.post(f"/api/visits/{v['id']}/note/draft", headers=h).json()
         assert "Fever" in n["content"]["soap"]["S"] and "Paracetamol" in n["content"]["rx"][0]["medicine"]
         assert n["citations"]["A"] == ["T3"]
         c.post(f"/api/notes/{n['id']}/sign", headers=h)
-        assert c.put(f"/api/visits/{v['id']}/text", headers=h, json={"text": "late edit"}).status_code == 409
+        assert c.put(f"/api/visits/{v['id']}/text", headers=h, json={"text": "late edit", "rev": 0}).status_code == 409
 
 
 def test_consent_is_required_and_recorded():

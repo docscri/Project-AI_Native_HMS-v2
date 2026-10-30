@@ -44,7 +44,7 @@ def test_2_operations_never_send_consultation_text():
         p = c.post("/api/patients", headers=rec, json={"name": "Secret", "consent": True}).json()
         v = c.post("/api/visits/walk-in", headers=rec, json={"patient_id": p["id"], "doctor_id": doc, "payment_method": "cash"}).json()
         c.post(f"/api/visits/{v['id']}/start", headers=h)
-        c.put(f"/api/visits/{v['id']}/text", headers=h, json={"text": "CONFIDENTIAL history"})
+        c.put(f"/api/visits/{v['id']}/text", headers=h, json={"text": "CONFIDENTIAL history", "rev": 0})
         for path in ("/api/operations/day", f"/api/operations/queue?doctor_id={doc}"):
             r = c.get(path, headers=rec, params={"date": TODAY})
             assert "CONFIDENTIAL" not in r.text and "dictation" not in r.text

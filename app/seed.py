@@ -120,11 +120,11 @@ def seed() -> bool:
                    "findings": [{"name": "HbA1c", "value": "8.9", "unit": "%"}, {"name": "Fasting glucose", "value": "168", "unit": "mg/dL"},
                                 {"name": "Creatinine", "value": "1.0", "unit": "mg/dL"}]})))
     history(db, cid, anjali, rahul, meera, tess, pid, receipt)
-    # payment history rows for every demo payment and refund
-    db.execute("""insert into payments (clinic_id, visit_id, kind, amount, method, receipt_no, at)
-                  select clinic_id, id, 'payment', coalesce(amount_paid, 0), payment_method, receipt_no, paid_at from visits where clinic_id = ? and paid_at is not null""", (cid,))
-    db.execute("""insert into payments (clinic_id, visit_id, kind, amount, reason, at)
-                  select clinic_id, id, 'refund', refund_amount, refund_reason, refunded_at from visits where clinic_id = ? and refund_amount > 0""", (cid,))
+    # payment history rows for every demo payment and refund, taken at the front desk
+    db.execute("""insert into payments (clinic_id, visit_id, kind, amount, method, receipt_no, at, by_member)
+                  select clinic_id, id, 'payment', coalesce(amount_paid, 0), payment_method, receipt_no, paid_at, ? from visits where clinic_id = ? and paid_at is not null""", (tess, cid))
+    db.execute("""insert into payments (clinic_id, visit_id, kind, amount, reason, at, by_member)
+                  select clinic_id, id, 'refund', refund_amount, refund_reason, refunded_at, ? from visits where clinic_id = ? and refund_amount > 0""", (tess, cid))
     db.execute("update notes set signed_by = doctor_id where clinic_id = ? and status = 'signed'", (cid,))
     db.execute("update clinics set next_receipt = ? where id = ?", (receipt[0] + 1, cid))
     db.commit()

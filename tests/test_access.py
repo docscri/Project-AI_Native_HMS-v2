@@ -23,7 +23,7 @@ def test_screen_rules_on_the_server():
         p = c.post("/api/patients", headers=rh, json={"consent": True, "name": "Pat"}).json()
         v = c.post("/api/visits/walk-in", headers=rh, json={"patient_id": p["id"], "doctor_id": doc, "payment_method": "cash"}).json()
         c.post(f"/api/visits/{v['id']}/start", headers=h)
-        c.put(f"/api/visits/{v['id']}/text", headers=h, json={"text": "Fever for two days."})
+        c.put(f"/api/visits/{v['id']}/text", headers=h, json={"text": "Fever for two days.", "rev": 0})
         n = c.post(f"/api/visits/{v['id']}/note/draft", headers=h).json()
         up = c.post(f"/api/visits/{v['id']}/documents", headers=rh, files={"file": ("r.txt", b"HbA1c 7.1 %", "text/plain")}).json()
         rtok = rh["Authorization"].split()[1]

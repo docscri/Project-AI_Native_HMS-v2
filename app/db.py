@@ -5,6 +5,7 @@ Both backends expose the same small interface used across the app:
     db.lock(key)            -> serialise writes that allocate numbers (tokens, UHIDs)
 Queries are written once with `?` placeholders.
 """
+import importlib.util
 import json
 import os
 import re
@@ -116,7 +117,8 @@ class PgDB:
         add_id = bool(m) and " returning " not in sql.lower() and m.group(1) not in _NO_ID
         cur = self.conn.cursor()
         cur.execute(to_pg(sql) + (" returning id" if add_id else ""), tuple(params))
-        lastrowid = cur.fetchone()["id"] if add_id else None
+        got = cur.fetchone() if add_id else None   # an insert ... select may insert nothing
+        lastrowid = got["id"] if got else None
         return PgCursor(cur, lastrowid)
 
     def script(self, sql):
@@ -150,7 +152,7 @@ def _dialect_sql(sql: str, dialect: str) -> str:
 
 
 def migrate() -> None:
-    """Apply app/migrations/NNN_name.sql in order, once each."""
+    """Apply app/migrations/NNN_name.sql (or .py) in order, once each."""
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     db = connect()
     try:
@@ -166,11 +168,17 @@ def migrate() -> None:
                 db.execute("insert into schema_version (version, name, applied_at) values (1, '001_init', ?)", (now(),))
                 db.commit()
                 done = {1}
-        for path in sorted(MIGRATIONS.glob("*.sql")):
+        for path in sorted([*MIGRATIONS.glob("*.sql"), *MIGRATIONS.glob("[0-9]*.py")]):
             version = int(path.name.split("_", 1)[0])
             if version in done:
                 continue
-            db.script(_dialect_sql(path.read_text(), db.dialect))
+            if path.suffix == ".py":   # data repairs that are clearer in Python: the file's run(db)
+                spec = importlib.util.spec_from_file_location(path.stem, path)
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                module.run(db)
+            else:
+                db.script(_dialect_sql(path.read_text(), db.dialect))
             db.execute("insert into schema_version (version, name, applied_at) values (?, ?, ?)", (version, path.stem, now()))
             db.commit()
     finally:

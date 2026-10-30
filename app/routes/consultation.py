@@ -134,7 +134,7 @@ def text_of(v: dict) -> str:
 
 class FreeText(BaseModel):
     text: str = Field(max_length=100_000)
-    rev: int | None = None   # the version this text was based on; older saves are refused
+    rev: int   # the version this text was based on; a save based on an older version is refused
 
 
 def editable(db, v: dict) -> None:
@@ -150,10 +150,8 @@ def save_text(visit_id: int, body: FreeText, me=Depends(doctor_screen), db=Depen
     """The one writing space: typed and dictated text together, saved as the doctor works."""
     v = get_visit(db, me, visit_id)
     editable(db, v)
-    if body.rev is None:
-        db.execute("update visits set dictation = ?, dictation_rev = dictation_rev + 1 where id = ?", (body.text, visit_id))
-    elif db.execute("update visits set dictation = ?, dictation_rev = dictation_rev + 1 where id = ? and dictation_rev = ?",
-                    (body.text, visit_id, body.rev)).rowcount != 1:
+    if db.execute("update visits set dictation = ?, dictation_rev = dictation_rev + 1 where id = ? and dictation_rev = ?",
+                  (body.text, visit_id, body.rev)).rowcount != 1:
         raise HTTPException(409, "Newer text was saved. Reloaded.")
     rev = db.execute("select dictation_rev from visits where id = ?", (visit_id,)).fetchone()[0]
     return {"ok": True, "length": len(body.text), "rev": rev}
