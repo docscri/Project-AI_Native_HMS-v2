@@ -738,9 +738,12 @@ function paneBrief(v) {
     return `${tiles.length ? `<div class="bchart-tiles">${tiles.map(chartCard).join("")}</div>` : ""}${trends.length ? `<div class="bchart-grid">${trends.map(chartCard).join("")}</div>` : ""}`;
   }
   const paras = b.summary.filter(p => p.sentences.length);
-  return paras.length ? paras.map(p => `<p class="cx-lead">${p.sentences.map(x => flagged(x.text, x.flags) + citeBtns(x.cites)).join(" ")}</p>`).join("") : `<p class="muted cx-lead">First visit.</p>`;
+  const nums = briefNums(b), sup = ids => `<sup class="cs">${ids.map(id => `<button data-a="cite" data-v="${id}" title="${esc(citeLabel(id))}">${nums.get(id)}</button>`).join("")}</sup>`;
+  return paras.length ? paras.map(p => `<p class="cx-lead">${p.sentences.map(x => flagged(x.text, x.flags) + sup(x.cites)).join(" ")}</p>`).join("") : `<p class="muted cx-lead">First visit.</p>`;
 }
 const num = x => String(+x);
+// Summary citations numbered in reading order; the Sources panel shows the same numbers.
+const briefNums = b => { const m = new Map(); (b?.summary || []).forEach(p => p.sentences.forEach(x => x.cites.forEach(id => m.has(id) || m.set(id, m.size + 1)))); return m; };
 const shown = p => p.text ?? num(p.value);   // the value as written (1.0 stays 1.0)
 const docTitle = d => d.title || d.extracted?.title || d.filename.replace(/\.[^.]+$/, "");
 // Values outside the usual range, marked inside the sentence.
@@ -864,10 +867,10 @@ function citations(v) {
   if (notes.length) groups.push([noteIcon, notes]);
   if (!groups.length) return `<div class="cx-empty">No sources</div>`;
   const card = id => {
-    const bs = b?.sources?.[id], on = S.focusSrc === id ? " hl" : "";
-    if (bs?.kind === "document") return `<div class="src-doc${on}" id="src-${id}"><small>REPORT · ${longDate(bs.date).toUpperCase()}</small><b>${esc(bs.label)}</b>${bs.summary ? `<span>${esc(bs.summary)}</span>` : ""}
+    const bs = b?.sources?.[id], on = S.focusSrc === id ? " hl" : "", n = briefNums(b).get(id), no = n ? `${n} · ` : "";
+    if (bs?.kind === "document") return `<div class="src-doc${on}" id="src-${id}"><small>${no}REPORT · ${longDate(bs.date).toUpperCase()}</small><b>${esc(bs.label)}</b>${bs.summary ? `<span>${esc(bs.summary)}</span>` : ""}
       ${bs.findings.length ? `<span class="src-vals">${bs.findings.map(f => esc(`${f.name} ${f.value} ${f.unit || ""}`.trim())).join(" · ")}</span>` : ""}<button class="btn small" data-a="open-doc" data-v="${bs.doc_id}">Open file</button></div>`;
-    if (bs?.kind === "note") return `<button class="${on.trim()}" id="src-${id}" data-a="note-view" data-v="${bs.visit_id}"><small>NOTE · ${longDate(bs.date).toUpperCase()} · ${bs.section.toUpperCase()}</small>${esc(bs.body)}<em>${esc(bs.doctor)}</em></button>`;
+    if (bs?.kind === "note") return `<button class="${on.trim()}" id="src-${id}" data-a="note-view" data-v="${bs.visit_id}"><small>${no}NOTE · ${longDate(bs.date).toUpperCase()} · ${bs.section.toUpperCase()}</small>${esc(bs.body)}<em>${esc(bs.doctor)}</em></button>`;
     const src = sourceOf(v, id); return src ? `<button data-a="cite" data-v="${id}"><small>${src.kind.toUpperCase()} · ${id}</small>${esc(src.text)}</button>` : "";
   };
   return `<div class="cite-list">${groups.map(([k, ids]) => `<div class="cite-item"><b>${k}</b><div class="cite-src">${ids.map(card).join("")}</div></div>`).join("")}</div>`;
