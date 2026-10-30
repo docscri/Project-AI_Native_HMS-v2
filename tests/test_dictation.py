@@ -99,3 +99,15 @@ def test_not_set_up_without_key(monkeypatch):
         h, doc = clinic(c, "d4@x.in")
         v = started_visit(c, h, doc)
         assert refused(c, f"/api/visits/{v['id']}/dictate", ["dictate", token(h)])["message"] == "Dictation is not set up."
+
+
+def test_dictated_paragraph_is_cited_by_sentence():
+    with TestClient(app) as c:
+        h, doc = clinic(c, "d5@x.in")
+        v = started_visit(c, h, doc)
+        text = "Fever and sore throat for three days. Temperature 100.8 F, throat congested. Likely acute pharyngitis. Paracetamol 650 mg three times a day for 3 days."
+        c.put(f"/api/visits/{v['id']}/text", headers=h, json={"text": text, "rev": 0})
+        n = c.post(f"/api/visits/{v['id']}/note/draft", headers=h).json()
+        cited = {k: v for k, v in n["citations"].items() if v}
+        assert cited["S"] == ["T1"] and cited["O"] == ["T2"] and cited["A"] == ["T3"]
+        assert "100.8" in n["content"]["soap"]["O"]

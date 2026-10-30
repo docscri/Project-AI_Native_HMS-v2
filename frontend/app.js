@@ -796,7 +796,7 @@ function rightCol() {
     <div class="cx-row"><span>Visits</span><b>${p.visits.filter(x => x.status === "done").length}</b></div></div>`;
 }
 function sourceOf(v, id) {
-  if (id.startsWith("T")) { const p = paragraphs(freeText(v))[Number(id.slice(1)) - 1]; return p && { kind: "Transcript", text: p.text }; }
+  if (id.startsWith("T")) { const p = sentences(freeText(v))[Number(id.slice(1)) - 1]; return p && { kind: "Transcript", text: p.text }; }
   if (id.startsWith("D")) { const d = v.documents.find(x => "D" + x.id === id); return d && { kind: "Document", text: d.filename + (d.extracted?.findings?.length ? " — " + d.extracted.findings.slice(0, 3).map(f => `${f.name} ${f.value} ${f.unit || ""}`.trim()).join(", ") : "") }; }
   if (id.startsWith("N")) return { kind: "Earlier note", text: "Signed note from a previous visit" };
   return null;
@@ -939,7 +939,15 @@ function putSpeech(el, text, final) {
   if (final) { d.start += pad.length + text.length; d.len = 0; } else d.len = pad.length + text.length;
   if (document.activeElement === el) el.setSelectionRange(d.start + d.len, d.start + d.len);
 }
-const paragraphs = text => { const out = []; let at = 0; for (const line of text.split("\n")) { if (line.trim()) out.push({ text: line.trim(), from: at, to: at + line.length }); at += line.length + 1; } return out; };
+// Same split as the server's ai.sentences(): T1, T2… are sentences; 100.8 stays whole.
+const sentences = text => {
+  const out = []; let at = 0;
+  for (const line of text.split("\n")) {
+    for (const m of line.matchAll(/[^.!?\s].*?(?:[.!?]+(?=\s|$)|$)/g)) { const t = m[0].trim(); if (t) out.push({ text: t, from: at + m.index, to: at + m.index + m[0].trimEnd().length }); }
+    at += line.length + 1;
+  }
+  return out;
+};
 function scheduleSave(visitId) { clearTimeout(S.ftT); S.ftT = setTimeout(() => saveText(visitId), 700); }
 // Each snapshot keeps its first rev so stale retries are refused by the server.
 function edit(visitId, text) {
@@ -1379,7 +1387,7 @@ document.addEventListener("click", e => {
       case "note-print": window.open(`/api/notes/${v}/print?auto=1&token=${encodeURIComponent(S.token)}`, "_blank"); break;
       case "print": window.open(`/api/notes/${v}/print?token=${encodeURIComponent(S.token)}`, "_blank"); break;
       case "open-doc": { const res = await fetch(`/api/documents/${v}/file`, { headers: { Authorization: "Bearer " + S.token } }); window.open(URL.createObjectURL(await res.blob()), "_blank"); break; }
-      case "cite": if (v.startsWith("T")) { const p = paragraphs(freeText(D.cur))[Number(v.slice(1)) - 1]; if (!p) break;
+      case "cite": if (v.startsWith("T")) { const p = sentences(freeText(D.cur))[Number(v.slice(1)) - 1]; if (!p) break;
         if (S.ctab !== "dictate") { S.ctab = "dictate"; renderConsult(); }
         const ta = $("#free-text"); ta.focus(); ta.setSelectionRange(p.from, p.to); break; }
       { const el = document.getElementById("ev-" + v); if (el) { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); el.classList.add("hl"); setTimeout(() => el.classList.remove("hl"), 1800); } else toast(v.startsWith("N") ? "From an earlier note." : "Source: " + v); break; }

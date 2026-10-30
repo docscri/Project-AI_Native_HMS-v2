@@ -41,10 +41,17 @@ def extract_document(data: bytes, mime: str, filename: str) -> dict:
 
 
 
+SENTENCE = re.compile(r"[^.!?\s].*?(?:[.!?]+(?=\s|$)|$)")
+
+
+def sentences(text: str) -> list[str]:
+    """Split like the page's sentences(): at . ! ? followed by a space or line end, so 100.8 stays whole."""
+    return [m.group().strip() for line in (text or "").split("\n") for m in SENTENCE.finditer(line) if m.group().strip()]
+
+
 def evidence(text: str, documents: list[dict], past_notes: list[dict]) -> list[dict]:
-    """Citable sources with stable ids; free text cited by paragraph (T1, T2...)."""
-    paras = [p.strip() for p in re.split(r"\n+", text or "") if p.strip()]
-    items = [{"id": f"T{i + 1}", "kind": "transcript", "text": p} for i, p in enumerate(paras)]
+    """Citable sources with stable ids; free text cited by sentence (T1, T2...)."""
+    items = [{"id": f"T{i + 1}", "kind": "transcript", "text": t} for i, t in enumerate(sentences(text))]
     for d in documents:
         ex = d.get("extracted") or {}
         vals = ", ".join(f'{f["name"]} {f["value"]} {f.get("unit", "")}'.strip() for f in ex.get("findings", []))
