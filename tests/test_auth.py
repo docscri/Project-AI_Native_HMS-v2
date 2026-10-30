@@ -115,3 +115,26 @@ def test_screen_rules_for_members():
         assert "administration" in upd["screens"]
         upd = c.patch(f"/api/members/{m['id']}", headers=h, json={"is_admin": False}).json()
         assert "administration" not in upd["screens"]
+
+
+def test_admin_reset_and_invite_links_can_be_emailed_or_copied(monkeypatch):
+    from fastapi.testclient import TestClient
+    from app import mailer
+    from app.main import app
+    sent = []
+    monkeypatch.setattr(mailer, "enabled", lambda: True)
+    monkeypatch.setattr(mailer, "send", lambda to, subject, body, html=None: sent.append((to, subject, body)) or True)
+    with TestClient(app) as c:
+        h = {"Authorization": "Bearer " + c.post("/api/onboarding/owner", json={"name": "Dr. L", "email": "links@x.in", "password": "clinic123"}).json()["token"]}
+        inv = c.post("/api/members", headers=h, json={"name": "Nina", "email": "nina@x.in", "kind": "staff", "screens": ["operations"]}).json()
+        sent.clear()
+        r = c.post(f"/api/members/{inv['id']}/invite", headers=h).json()
+        assert r["email_enabled"] is True and not sent           # making a link doesn't email by itself
+        c.post(f"/api/members/{inv['id']}/invite/email", headers=h)
+        assert sent and r["invite_code"] in sent[-1][2]          # the emailed link is the same one
+        c.post("/api/invites/accept", json={"code": r["invite_code"], "password": "nina1234"})
+        link = c.post(f"/api/members/{inv['id']}/reset-link", headers=h).json()
+        c.post(f"/api/members/{inv['id']}/reset-link/email", headers=h, json={"code": link["code"]})
+        assert link["code"] in sent[-1][2]
+        assert c.post(f"/api/members/{inv['id']}/reset-link/email", headers=h, json={"code": "made-up"}).status_code == 409
+        assert c.post("/api/auth/reset", json={"code": link["code"], "password": "newpass123"}).status_code == 200

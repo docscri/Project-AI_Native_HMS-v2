@@ -336,11 +336,11 @@ def add_member(body: NewMember, me=Depends(require_admin), db=Depends(get_db)):
     return public_member(row(db.execute("select * from members where id = ?", (mid,)).fetchone()))
 
 
-def send_invite(db, me, member_id: int, code: str) -> None:
+def send_invite(db, me, member_id: int, code: str) -> bool:
     m = row(db.execute("select name, email from members where id = ?", (member_id,)).fetchone())
     clinic = clinic_of(db, me)
     link = f"{mailer.app_url()}/#/invite/{code}"
-    mailer.send(m["email"], f"Join {clinic['name']} on Dictate",
+    return mailer.send(m["email"], f"Join {clinic['name']} on Dictate",
                 f"Hello {m['name']},\n\n{me['name']} has invited you to {clinic['name']}.\n"
                 f"Open this link within {INVITE_DAYS} days to set your password:\n{link}",
                 mailer.branded(clinic["name"], f"Join {clinic['name']}",
@@ -356,8 +356,20 @@ def renew_invite(member_id: int, me=Depends(require_admin), db=Depends(get_db)):
         raise HTTPException(409, "This person has already joined.")
     code = new_code()
     db.execute("update members set invite_code = ?, invite_expires_at = ? where id = ?", (code, later(days=INVITE_DAYS), member_id))
-    send_invite(db, me, member_id, code)
-    return {"invite_code": code, "email_sent": mailer.enabled()}
+    return {"invite_code": code, "email_enabled": mailer.enabled()}
+
+
+@router.post("/members/{member_id}/invite/email")
+def email_invite(member_id: int, me=Depends(require_admin), db=Depends(get_db)):
+    """Email the member's current invite link (the same one the admin can copy)."""
+    m = row(db.execute("select * from members where id = ? and clinic_id = ?", (member_id, me["clinic_id"])).fetchone())
+    if not m or m["status"] != "invited" or not m["invite_code"]:
+        raise HTTPException(409, "This person has already joined.")
+    if not mailer.enabled():
+        raise HTTPException(409, "Email isn't set up.")
+    if not send_invite(db, me, member_id, m["invite_code"]):
+        raise HTTPException(502, "Email couldn't be sent. Copy the link.")
+    return {"email": m["email"]}
 
 
 @router.post("/members/{member_id}/reset-link")
@@ -367,7 +379,31 @@ def admin_reset_link(member_id: int, me=Depends(require_admin), db=Depends(get_d
     if not m or m["status"] != "active":
         raise HTTPException(409, "Member isn't active.")
     log_event(db, me["clinic_id"], me["id"], "member", member_id, "reset_link_created")
-    return {"code": make_reset(db, member_id)}
+    return {"code": make_reset(db, member_id), "email_enabled": mailer.enabled()}
+
+
+class ResetEmail(BaseModel):
+    code: str
+
+
+@router.post("/members/{member_id}/reset-link/email")
+def email_reset_link(member_id: int, body: ResetEmail, me=Depends(require_admin), db=Depends(get_db)):
+    """Email the reset link the admin just made, so copying and emailing share one link."""
+    m = row(db.execute("select * from members where id = ? and clinic_id = ? and status = 'active'", (member_id, me["clinic_id"])).fetchone())
+    ok = m and db.execute("select 1 from password_resets where token_hash = ? and member_id = ? and used_at is null and expires_at > ?",
+                          (token_hash(body.code), member_id, now())).fetchone()
+    if not ok:
+        raise HTTPException(409, "Link expired. Make a new one.")
+    if not mailer.enabled():
+        raise HTTPException(409, "Email isn't set up.")
+    link = f"{mailer.app_url()}/#/reset/{body.code}"
+    if not mailer.send(m["email"], "Reset your Dictate password",
+                f"Hello {m['name']},\n\nOpen this link within {RESET_HOURS} hours to set a new password:\n{link}",
+                mailer.branded(clinic_of(db, me)["name"], "Reset your password", f"Hello {m['name']}, tap the button to set a new password.",
+                               "Set new password", link, f"The link works for {RESET_HOURS} hours.")):
+        raise HTTPException(502, "Email couldn't be sent. Copy the link.")
+    log_event(db, me["clinic_id"], me["id"], "member", member_id, "reset_link_emailed")
+    return {"email": m["email"]}
 
 
 class MemberUpdate(BaseModel):

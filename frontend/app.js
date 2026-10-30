@@ -185,11 +185,12 @@ function viewOnboarding(step) {
 }
 async function loadMembersStep() {
   const ms = (await api("/members")).filter(m => !m.is_owner);
+  S.members = ms;
   obFrame(4, `<h1>Your team</h1>
     <div class="ob-team"><button class="btn" data-a="member-add" data-v="doctor">+ Add doctor</button><button class="btn" data-a="member-add" data-v="staff">+ Add staff</button></div>
     ${ms.length ? `<div class="rows">${ms.map(m => `<div class="r q"><b>${m.kind === "doctor" ? "Doctor" : esc(m.designation)}</b><span class="who">${esc(m.name)}</span>${inviteLink(m)}</div>`).join("")}</div>` : ""}`, "Finish setup");
 }
-const inviteLink = m => m.status === "invited" ? `<button class="btn small" data-a="renew-invite" data-v="${m.id}">Copy invite link</button>` : `<span class="pill s-paid">Active</span>`;
+const inviteLink = m => m.status === "invited" ? `<button class="btn small" data-a="renew-invite" data-v="${m.id}">Invite link</button>` : `<span class="pill s-paid">Active</span>`;
 
 async function obNext(step) {
   if (step === 1 && S.me) { S.me = await api("/onboarding/owner", { method: "PUT", body: { name: $("#ob-name").value, email: $("#ob-email").value, phone: $("#ob-phone").value, password: $("#ob-pw").value, is_doctor: $("#ob-doc").checked } }); S.doctors = await api("/doctors"); return viewOnboarding(2); }
@@ -540,7 +541,7 @@ function openMember(kind, m) {
     <div class="days">${SCREENS.filter(([key]) => key !== "consultation" || k === "doctor").map(([key, , l]) => `<label><input type="checkbox" id="mb-s-${key}" ${screens.includes(key) || locked ? "checked" : ""} ${locked || (key === "administration" && !m?.is_admin) ? "disabled" : ""}>${l}</label>`).join("")}</div>
     <div class="toggles"><label class="choice"><input type="checkbox" id="mb-admin" data-a="mb-admin" ${m?.is_admin ? "checked" : ""} ${locked ? "disabled" : ""}><span><b>Admin access</b></span></label>
     ${m && !m.is_owner && m.status !== "invited" ? `<label class="choice"><input type="checkbox" id="mb-active" ${m.status === "active" ? "checked" : ""}><span><b>Active</b></span></label>` : ""}</div>
-    <div class="foot">${m && !m.is_owner ? `<button class="btn danger" data-a="mb-remove" style="margin-right:auto">Remove</button>` : ""}${m?.status === "invited" ? `<button class="btn" data-a="renew-invite" data-v="${m.id}">Copy invite link</button>` : ""}${m?.status === "active" && !m.is_owner ? `<button class="btn" data-a="reset-link" data-v="${m.id}">Password reset link</button>` : ""}${m && k === "doctor" ? `<button class="btn" data-a="mb-schedule" data-v="${m.id}">Schedule</button>` : ""}
+    <div class="foot">${m && !m.is_owner ? `<button class="btn danger" data-a="mb-remove" style="margin-right:auto">Remove</button>` : ""}${m?.status === "invited" ? `<button class="btn" data-a="renew-invite" data-v="${m.id}">Invite link</button>` : ""}${m?.status === "active" && !m.is_owner ? `<button class="btn" data-a="reset-link" data-v="${m.id}">Reset password</button>` : ""}${m && k === "doctor" ? `<button class="btn" data-a="mb-schedule" data-v="${m.id}">Schedule</button>` : ""}
       <button class="btn" data-a="close">Cancel</button><button class="btn primary" data-a="mb-save">${m ? "Save" : "Send invitation"}</button></div>`);
 }
 async function saveMember() {
@@ -563,6 +564,17 @@ async function saveMember() {
   }
   S.doctors = await api("/doctors"); closeModal();
   if (OB.step === 4 && !S.clinic.onboarded) loadMembersStep(); else route();
+}
+// Invite or password-reset link: one link that can be emailed and copied.
+function openShare(what, id, code, emailOn) {
+  const m = (S.members || []).find(x => x.id === id), back = M?.kind === "member" ? M : null;
+  const link = `${location.origin}/#/${what}/${code}`;
+  M = { kind: "share", what, id, code, link, back };
+  modal(`<h2>${what === "invite" ? "Invite link" : "Password reset"}</h2>
+    <div class="pt-chip share-chip"><span class="avatar">${esc(initials(m?.name || "?"))}</span><span class="pt-main"><b>${esc(m?.name || "")}</b><span class="pt-meta"><span>${esc(m?.email || "")}</span><span>${what === "invite" ? "7 days" : "2 hours"}</span></span></span></div>
+    <div class="share-row">${emailOn ? `<button class="share-opt" data-a="share-email"><b>Email link</b><span>Sends it to their inbox</span></button>` : ""}
+      <button class="share-opt" data-a="share-copy"><b>Copy link</b><span>Paste in WhatsApp or SMS</span></button></div>
+    <div class="foot"><button class="btn" data-a="share-back">Back</button><button class="btn primary" data-a="close">Done</button></div>`);
 }
 function copyLink(link, msg) {
   navigator.clipboard?.writeText(link).then(() => toast(msg), () => { M = { kind: "link" }; modal(`<h2>Share this link</h2><label class="field">Link<input readonly value="${esc(link)}" onfocus="this.select()"></label><div class="foot"><button class="btn primary" data-a="close">Done</button></div>`); });
@@ -1093,8 +1105,12 @@ document.addEventListener("click", e => {
       case "ob-next": await obNext(Number(v)); break;
       case "ob-finish": await obFinish(); break;
       case "ob-back": { const st = Number(v); if (st === 1) { if (S.me) { logout(); } else go("#/login"); } else viewOnboarding(st - 1); break; }
-      case "renew-invite": { const r = await api(`/members/${v}/invite`, { body: {} }); copyLink(`${location.origin}/#/invite/${r.invite_code}`, r.email_sent ? "Invite emailed · link copied" : "Invite link copied · valid 7 days"); break; }
-      case "reset-link": { const r = await api(`/members/${v}/reset-link`, { body: {} }); copyLink(`${location.origin}/#/reset/${r.code}`, "Reset link copied · valid 2 hours"); break; }
+      case "renew-invite": { const r = await api(`/members/${v}/invite`, { body: {} }); openShare("invite", Number(v), r.invite_code, r.email_enabled); break; }
+      case "reset-link": { const r = await api(`/members/${v}/reset-link`, { body: {} }); openShare("reset", Number(v), r.code, r.email_enabled); break; }
+      case "share-copy": copyLink(M.link, M.what === "invite" ? "Invite link copied · valid 7 days" : "Reset link copied · valid 2 hours"); break;
+      case "share-email": { const r = M.what === "invite" ? await api(`/members/${M.id}/invite/email`, { body: {} }) : await api(`/members/${M.id}/reset-link/email`, { body: { code: M.code } });
+        toast(`${M.what === "invite" ? "Invite" : "Reset link"} emailed to ${r.email}`); break; }
+      case "share-back": { const back = M.back; if (back?.kind === "member") openMember(back.mkind, back.m); else closeModal(); break; }
       case "account": await openAccount(); break;
       case "ac-save": {
         const nw = $("#ac-new").value;
