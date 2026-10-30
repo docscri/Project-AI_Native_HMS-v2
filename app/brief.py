@@ -38,13 +38,46 @@ def outside(name: str, unit: str, value) -> bool:
     return bool(r) and (unit or "").replace(" ", "").lower() in (r[2], "") and not r[0] <= v <= r[1]
 
 
+def lab_range(text) -> list | None:
+    """The report's printed range as [low, high]; a side is None for "< 200" or "> 40". None if unreadable."""
+    t = str(text or "").replace(",", "").strip()
+    if m := re.fullmatch(r"(\d+(?:\.\d+)?)\s*(?:-|–|—|to)\s*(\d+(?:\.\d+)?)\s*\S*", t):
+        return [float(m[1]), float(m[2])]
+    if m := re.fullmatch(r"(?:<|≤|<=|up to|upto)\s*(\d+(?:\.\d+)?)\s*\S*", t, re.I):
+        return [None, float(m[1])]
+    if m := re.fullmatch(r"(?:>|≥|>=)\s*(\d+(?:\.\d+)?)\s*\S*", t):
+        return [float(m[1]), None]
+    return None
+
+
+def lab_says(f: dict) -> bool | None:
+    """The lab's own verdict on a value: its printed flag first, then its printed range. None if it gives neither."""
+    flag = str(f.get("flag") or "").strip().lower()
+    if flag in ("h", "l", "high", "low", "*", "**", "↑", "↓", "abnormal"):
+        return True
+    r = lab_range(f.get("range"))
+    try:
+        v = float(str(f.get("value")).replace(",", ""))
+    except ValueError:
+        return None
+    if r is None:
+        return None
+    return (r[0] is not None and v < r[0]) or (r[1] is not None and v > r[1])
+
+
+def is_out(f: dict) -> bool:
+    """Report's flag, then report's range, then the built-in usual range."""
+    said = lab_says(f)
+    return said if said is not None else outside(name_of(f.get("name") or f.get("test")), f.get("unit") or "", f.get("value"))
+
+
 def abnormal_values(f: dict) -> list[str]:
-    """The value text(s) of a finding that sit outside the usual range."""
+    """The value text(s) of a finding that sit outside the range."""
     name, unit, value = name_of(f.get("name") or f.get("test")), f.get("unit") or "", str(f.get("value") or "").replace(" ", "")
     if name == "BP" and "/" in value:
         sys_, dia = value.split("/", 1)
         return [value] if outside("BP systolic", unit, sys_) or outside("BP diastolic", unit, dia) else []
-    return [value] if outside(name, unit, value) else []
+    return [value] if is_out(f) else []
 
 
 def title_of(d: dict) -> str:
@@ -114,7 +147,7 @@ def checked(items, sources: dict) -> list[dict]:
 
 def charts(notes: list[dict], docs: list[dict], db) -> list[dict]:
     points = {}   # (test, unit) -> {date: point}; a report beats a note on the same day
-    def add(test, unit, value, day, cite, from_doc):
+    def add(test, unit, value, day, cite, from_doc, f=None):
         name = name_of(test)
         unit = str(unit or "").strip()
         value = str(value).replace(" ", "").replace(",", "")
@@ -127,17 +160,22 @@ def charts(notes: list[dict], docs: list[dict], db) -> list[dict]:
             return
         series = points.setdefault((name, unit), {})
         if from_doc or day not in series or not series[day]["doc"]:
-            series[day] = {"date": day, "value": float(value), "text": value, "cite": cite, "doc": from_doc}
+            said = lab_says(f) if f else None
+            series[day] = {"date": day, "value": float(value), "text": value, "cite": cite, "doc": from_doc,
+                           "out": said if said is not None else outside(name, unit, value), "lab": lab_range(f.get("range")) if f else None}
     for d in docs:
         for f in d["extracted"].get("findings") or []:
-            add(f.get("name"), f.get("unit"), f.get("value"), (f.get("date") or d["created_at"])[:10], f"D{d['id']}", True)
+            add(f.get("name"), f.get("unit"), f.get("value"), (f.get("date") or d["created_at"])[:10], f"D{d['id']}", True, f)
     for n in notes:
         for f in values_of(db, n):
             add(f["test"], f.get("unit"), f["value"], n["date"], f"N{n['id']}.{f['section']}", False)
     out, bp = [], {}
     for (name, unit), series in points.items():
-        pts = [{k: p[k] for k in ("date", "value", "text", "cite")} | {"out": outside(name, unit, p["value"])} for p in sorted(series.values(), key=lambda p: p["date"])]
-        ser = {"name": name, "points": pts, "range": list(RANGES[name][:2]) if name in RANGES and unit.replace(" ", "").lower() in (RANGES[name][2], "") else None}
+        ordered = sorted(series.values(), key=lambda p: p["date"])
+        pts = [{k: p[k] for k in ("date", "value", "text", "cite", "out")} for p in ordered]
+        lab = next((p["lab"] for p in reversed(ordered) if p["lab"]), None)   # the latest report's printed range wins
+        usual = list(RANGES[name][:2]) if name in RANGES and unit.replace(" ", "").lower() in (RANGES[name][2], "") else None
+        ser = {"name": name, "points": pts, "range": lab or usual, "range_from": "report" if lab else "usual" if usual else None}
         if name.startswith("BP "):
             bp[name] = ser | {"name": name.split()[1].title()}
         else:

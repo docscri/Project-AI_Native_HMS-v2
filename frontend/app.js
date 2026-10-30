@@ -761,7 +761,8 @@ function chartSvg(c, big) {
   const W = big ? 720 : 320, H = big ? 300 : 112, L = big ? 44 : 30, R = big ? 18 : 10, T = big ? 22 : 12, B = big ? 30 : 20, pts = c.series.flatMap(x => x.points);
   const band = c.series.length === 1 ? c.series[0].range : null;
   const ms = d => new Date(d).getTime(), t0 = Math.min(...pts.map(p => ms(p.date))), t1 = Math.max(...pts.map(p => ms(p.date)));
-  let lo = Math.min(...pts.map(p => p.value), ...(band || [])), hi = Math.max(...pts.map(p => p.value), ...(band || []));
+  const edges = (band || []).filter(e => e != null);   // a printed range can be one-sided ("< 200")
+  let lo = Math.min(...pts.map(p => p.value), ...edges), hi = Math.max(...pts.map(p => p.value), ...edges);
   const pad = (hi - lo || Math.abs(hi) || 1) * 0.15; lo -= pad; hi += pad;
   const x = d => t1 === t0 ? (L + W - R) / 2 : L + (ms(d) - t0) / (t1 - t0) * (W - L - R);
   const y = val => T + (hi - val) / (hi - lo) * (H - T - B);
@@ -774,7 +775,7 @@ function chartSvg(c, big) {
     ${ser.points.map(p => `<g class="bpt" ${big ? `data-a="cite" data-v="${p.cite}" tabindex="0" role="button"` : ""} aria-label="${esc(ser.name)} ${shown(p)} ${esc(c.unit)}, ${longDate(p.date)}${p.out ? ", outside usual range" : ""}"><circle cx="${x(p.date)}" cy="${y(p.value)}" r="${big ? 14 : 10}" fill="transparent"/><circle cx="${x(p.date)}" cy="${y(p.value)}" r="${big ? 5 : 3.5}" fill="${c.series.length === 1 && p.out ? "#D9542F" : colors[i]}" stroke="${p.out ? (c.series.length === 1 ? "#D9542F" : "var(--ink)") : "var(--surface)"}" stroke-width="2"/>
       <text class="bpt-tip" x="${Math.min(Math.max(x(p.date), L + 28), W - R - 28)}" y="${Math.max(y(p.value) - 12, 12)}" text-anchor="middle">${shown(p)} · ${monYr(p.date)}</text></g>`).join("")}`).join("");
   return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(c.test)} over time">
-    ${band ? `<rect x="${L}" y="${y(band[1])}" width="${W - L - R}" height="${y(band[0]) - y(band[1])}" class="bchart-band" rx="4"><title>Usual range ${num(band[0])}–${num(band[1])}</title></rect>` : ""}
+    ${band ? `<rect x="${L}" y="${y(band[1] ?? hi)}" width="${W - L - R}" height="${y(band[0] ?? lo) - y(band[1] ?? hi)}" class="bchart-band" rx="4"><title>${rangeText(band)}</title></rect>` : ""}
     ${big ? ticks.map(t => `<line x1="${L}" y1="${y(t)}" x2="${W - R}" y2="${y(t)}" class="bchart-grid-line"/>`).join("") : ""}
     <line x1="${L}" y1="${H - B}" x2="${W - R}" y2="${H - B}" class="bchart-axis"/>
     ${ticks.map(t => `<text x="${L - 8}" y="${y(t) + 4}" text-anchor="end" class="bchart-tick">${num(+t.toFixed(1))}</text>`).join("")}
@@ -789,6 +790,7 @@ function chartCard(c, i) {
   const legend = c.series.length > 1 ? `<div class="bchart-legend">${c.series.map((ser, k) => `<span><i style="background:${["#2a78d6", "#D9542F"][k]}"></i>${esc(ser.name)}</span>`).join("")}</div>` : "";
   return `<button class="bchart" data-a="chart-open" data-v="${i}" aria-label="${esc(c.test)}: open a larger chart">${head}${legend}${chartSvg(c, false)}</button>`;
 }
+const rangeText = r => r[0] == null ? `below ${num(r[1])}` : r[1] == null ? `above ${num(r[0])}` : `${num(r[0])}–${num(r[1])}`;
 // Larger view of one chart, with every reading and its source.
 function openChart(c) {
   M = { kind: "chart" };
@@ -796,8 +798,8 @@ function openChart(c) {
   const byDay = {};
   c.series.forEach(ser => ser.points.forEach(p => { (byDay[p.date] = byDay[p.date] || []).push(p); }));
   const rows = Object.entries(byDay).sort((a, b) => b[0].localeCompare(a[0])).map(([date, ps]) => ({ date, text: ps.map(shown).join("/"), out: ps.some(p => p.out), cite: ps[0].cite }));
-  const range = c.series.length === 1 && c.series[0].range;
-  modal(`<div><h2>${esc(c.test)}</h2><span class="muted">${esc(c.unit || "")}${range ? ` · usual ${num(range[0])}–${num(range[1])}` : ""}</span></div>
+  const ser = c.series.length === 1 && c.series[0], range = ser?.range;
+  modal(`<div><h2>${esc(c.test)}</h2><span class="muted">${esc(c.unit || "")}${range ? ` · ${ser.range_from === "report" ? "report range" : "usual"} ${rangeText(range)}` : ""}</span></div>
     ${c.series.length > 1 ? `<div class="bchart-legend">${c.series.map((ser, k) => `<span><i style="background:${["#2a78d6", "#D9542F"][k]}"></i>${esc(ser.name)}</span>`).join("")}</div>` : ""}
     <div class="bchart-big">${chartSvg(c, true)}</div>
     <div class="bchart-rows">${rows.map(p => `<button data-a="cite" data-v="${p.cite}"><span>${longDate(p.date)}</span><b class="${p.out ? "abn" : ""}">${esc(p.text)} ${esc(c.unit || "")}</b><small>${esc(citeLabel(p.cite))}</small></button>`).join("")}</div>`, true);

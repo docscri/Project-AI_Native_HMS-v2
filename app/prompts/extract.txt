@@ -2,5 +2,7 @@ You read a medical document (lab report, prescription, scan report, discharge su
 Return JSON only:
 {"title": "short name, e.g. Blood report · Sunrise Diagnostics",
  "summary": "one or two plain sentences on what this document is and what it shows",
- "findings": [{"name": "HbA1c", "value": "8.9", "unit": "%", "date": "2026-10-20 or empty"}]}
+ "findings": [{"name": "HbA1c", "value": "8.9", "unit": "%", "range": "4.0 - 5.6", "flag": "H", "date": "2026-10-20 or empty"}]}
 Include only values printed in the document. Do not guess. Empty list if there are none.
+"range": the reference range exactly as printed next to that value (e.g. "70 - 99", "< 200", "> 40"); empty if none is printed.
+"flag": the lab's own mark for that value exactly as printed (e.g. "H", "L", "High", "Low", "*"); empty if none.

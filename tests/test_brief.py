@@ -94,7 +94,7 @@ def test_report_beats_note_on_the_same_day():
     notes = [{"id": 1, "date": "2026-10-20", "vals": json.dumps([{"test": "HbA1c", "value": "7.0", "unit": "%", "section": "O"}])}]
     docs = [{"id": 5, "created_at": "2026-10-20T09:00:00", "extracted": {"findings": [{"name": "Glycated Hb", "value": "7.2", "unit": "%"}]}}]
     out = brief.charts(notes, docs, None)
-    assert out == [{"test": "HbA1c", "unit": "%", "series": [{"name": "HbA1c", "range": [4.0, 5.6],
+    assert out == [{"test": "HbA1c", "unit": "%", "series": [{"name": "HbA1c", "range": [4.0, 5.6], "range_from": "usual",
                                                               "points": [{"date": "2026-10-20", "value": 7.2, "text": "7.2", "cite": "D5", "out": True}]}]}]
 
 
@@ -119,3 +119,24 @@ def test_brief_is_ready_when_the_patient_arrives(monkeypatch):
         h, doc, pid, n1, n2 = setup(c, "b4@x.in")
         today = c.post("/api/visits/walk-in", headers=h, json={"patient_id": pid, "doctor_id": doc, "payment_method": "cash"}).json()
         assert c.get(f"/api/visits/{today['id']}", headers=h).json()["brief"]["events"]     # built in the background, no click needed
+
+
+def test_lab_flag_and_printed_range_come_before_the_built_in_list():
+    f = lambda **k: {"name": "HbA1c", "value": "6.0", "unit": "%", **k}
+    assert brief.is_out(f()) is True                                   # built-in 4.0–5.6
+    assert brief.is_out(f(range="4.0 - 6.4")) is False                 # the lab's own range wins
+    assert brief.is_out(f(range="4.0 - 6.4", flag="H")) is True        # the lab's flag wins over everything
+    assert brief.is_out(f(range="see comment")) is True                # unreadable range: built-in list
+    assert brief.is_out({"name": "Cholesterol", "value": "230", "unit": "mg/dL", "range": "< 200"}) is True   # not in the list
+    assert brief.is_out({"name": "HDL", "value": "35", "unit": "mg/dL", "range": "> 40"}) is True
+    assert brief.is_out({"name": "TSH", "value": "3.1", "unit": "mIU/L"}) is False                          # nothing to compare with
+    assert brief.lab_range("70 – 99 mg/dL") == [70, 99] and brief.lab_range("< 200") == [None, 200]
+
+
+def test_chart_uses_the_reports_range():
+    docs = [{"id": 7, "created_at": "2026-10-20T09:00:00", "extracted": {"findings": [
+        {"name": "Cholesterol", "value": "230", "unit": "mg/dL", "range": "< 200"},
+        {"name": "Fasting glucose", "value": "105", "unit": "mg/dL", "range": "70 - 110"}]}}]
+    charts = {c["test"]: c["series"][0] for c in brief.charts([], docs, None)}
+    assert charts["Cholesterol"]["range"] == [None, 200] and charts["Cholesterol"]["range_from"] == "report" and charts["Cholesterol"]["points"][0]["out"]
+    assert charts["Fasting sugar"]["range"] == [70, 110] and not charts["Fasting sugar"]["points"][0]["out"]   # 105 is fine by this lab
