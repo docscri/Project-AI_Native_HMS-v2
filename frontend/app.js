@@ -632,6 +632,7 @@ function renderConsult() {
   S.cxShown = v?.id ?? "p" + D.pid;
   const fe = $("#free-text"); if (fe && S.ft?.id === Number(fe.dataset.v)) { S.ft.sel = document.activeElement === fe ? fe.selectionEnd : null; S.ft.scroll = fe.scrollTop; }
   if (S.ft && S.ft.id !== v?.id) { saveText(S.ft.id, S.ft); S.ft = null; }
+  if (!S.ft && v && S.drafts?.[v.id] && S.drafts[v.id].saved !== S.drafts[v.id].text) S.ft = S.drafts[v.id];   // back to unsaved text
   if (S.noteVisit !== v?.id) { S.noteVisit = v?.id; S.noteEdit = false; }
   const floatMic = v && (["waiting", "with_doctor"].includes(v.status) || S.recState) && S.ctab !== "note";
   $("#root").innerHTML = `<div class="cx">
@@ -936,7 +937,11 @@ function done(visitId, ft, text) {
   return true;
 }
 const unsaved = () => Object.values(S.drafts || {}).some(d => d.saved !== d.text);
-const flushText = async () => !S.ft || (await saveText(S.ft.id)) !== false;
+// Before anything uses the text (note draft, tab change): save the visit's unsaved text; false if it couldn't be saved.
+const flushText = async (visitId = S.ft?.id ?? S.data?.cur?.id) => {
+  const d = S.drafts?.[visitId];
+  return !d || d.saved === d.text || (await saveText(visitId, d)) !== false;
+};
 window.addEventListener("beforeunload", e => { if (unsaved()) { e.preventDefault(); e.returnValue = ""; } });
 
 /* ---------- patients ---------- */
@@ -1293,7 +1298,7 @@ document.addEventListener("click", e => {
       case "cs-side": S.cside = v; renderConsult(); break;
       case "cs-left": S.cleft = v; refreshConsult(); break;
       case "cs-patient": go(`#/consult?doctor=${D.doctorId}&patient=${v}`); break;
-      case "cs-draft-go": if (!(await flushText())) break; await api(`/visits/${v}/note/draft`, { body: {} }); S.ctab = "note"; toast("Draft ready."); refreshConsult(); break;
+      case "cs-draft-go": if (!(await flushText(Number(v)))) break; await api(`/visits/${v}/note/draft`, { body: {} }); S.ctab = "note"; toast("Draft ready."); refreshConsult(); break;
       case "note-sign-ro": await api(`/notes/${v}`, { method: "PUT", body: D.cur.note.content }); await api(`/notes/${v}/sign`, { body: {} }); toast("Signed. Visit complete."); refreshConsult(); break;
       case "cs-next-mic": { const r = await api(`/consultation/next?doctor_id=${v}`, { body: {} }); S.ctab = "dictate"; await new Promise(res => { const once = () => { window.removeEventListener("hashchange", once); setTimeout(res, 300); }; window.addEventListener("hashchange", once); go(`#/consult/${r.id}?doctor=${v}`); }); startMic(r.id); break; }
       case "cs-collapse": S.rightCollapsed = !S.rightCollapsed; renderConsult(); break;
@@ -1312,7 +1317,7 @@ document.addEventListener("click", e => {
       case "cs-open": go(`#/consult/${v}?doctor=${D.doctorId}`); break;
       case "cs-start": await api(`/visits/${v}/start`, { body: {} }); refreshConsult(); break;
       case "cs-brief": await api(`/visits/${v}/brief`, { body: {} }); toast("Brief updated"); refreshConsult(); break;
-      case "cs-draft": if (!(await flushText())) break; if (S.recState) await stopMic(); S.ctab = "note"; S.drafting = Number(v); S.noteEdit = false; renderConsult();
+      case "cs-draft": if (!(await flushText(Number(v)))) break; if (S.recState) await stopMic(); S.ctab = "note"; S.drafting = Number(v); S.noteEdit = false; renderConsult();
         try { await Promise.all([api(`/visits/${v}/note/draft`, { body: {} }), new Promise(r => setTimeout(r, 1400))]); } finally { S.drafting = null; S.dictDone = null; } refreshConsult(); break;
       case "mic": if (S.recState) await stopMic(); else { S.ctab = "dictate"; startMic(Number(v)); } break;
       case "spk": S.speaker = v; document.querySelectorAll('[data-a="spk"]').forEach(b => b.setAttribute("aria-pressed", b.dataset.v === v)); break;
