@@ -236,7 +236,11 @@ def draft(visit_id: int, me=Depends(doctor_screen), db=Depends(get_db)):
     if not any(i["kind"] == "transcript" for i in items) and not any(i["kind"] == "document" for i in items):
         raise HTTPException(422, "Dictate or add a document first.")
     d = ai.draft_note(patient, items)
-    content = json.dumps({"soap": d["soap"], "rx": d["rx"]})
+    # Same shape the editor sends back, so saving an untouched draft doesn't count as an edit.
+    soap = {k: str((d.get("soap") or {}).get(k) or "") for k in ("S", "O", "A", "P")}
+    rx = [{f: str(r.get(f) or "") for f in ("medicine", "dose", "duration", "instructions")} for r in d.get("rx") or [] if isinstance(r, dict)]
+    d["citations"] = {k: list((d.get("citations") or {}).get(k) or []) for k in ("S", "O", "A", "P")}
+    content = json.dumps({"soap": soap, "rx": rx})
     cited = {c for ids in d["citations"].values() for c in ids}
     # Saved so citations keep pointing at the right words if the transcript changes later.
     sources = json.dumps({i["id"]: i["text"] for i in items if i["kind"] == "transcript" and i["id"] in cited})

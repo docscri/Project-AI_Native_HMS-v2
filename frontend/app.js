@@ -859,8 +859,11 @@ function listen(visitId) {
 function pauseMic() {
   if (S.recState !== "on") return;
   S.recAcc = recElapsed(); S.recState = "paused";
-  const r = S.rec; S.rec = null; try { if (r?.finish) S.finishing = r.finish().catch(() => {}); else r?.stop(); } catch {}
-  S.dict = null; renderConsult();
+  const r = S.rec; S.rec = null;
+  // Deepgram's last words arrive after the pause, so keep the insertion point until they have.
+  if (r?.finish) S.finishing = r.finish().catch(() => {}).finally(() => { if (S.recState !== "on") S.dict = null; });
+  else { try { r?.stop(); } catch {} S.dict = null; }
+  renderConsult();
 }
 function resumeMic() {
   if (S.recState !== "paused") return;
@@ -932,7 +935,8 @@ async function streamMic(visitId) {
   rec.stop = () => { clearTimeout(timer); mic.stop(); ws.close(); };
   rec.finish = async () => {   // send the last audio, then wait for Deepgram's last words
     clearTimeout(timer); await mic.stop({ flush: true });
-    if (ws.readyState === 1) { ws.send("stop"); await Promise.race([done, new Promise(r => setTimeout(r, 8000))]); } else ws.close();
+    if (ws.readyState === 1) { ws.send("stop"); await Promise.race([done, new Promise(r => setTimeout(r, 8000))]); }
+    ws.close();   // no-op once closed; ends a stream the server never closed
   };
 }
 // The doctor typed while words were still being recognised: keep those words, and let the rest of

@@ -136,3 +136,39 @@ def test_citations_keep_their_sentences_after_the_transcript_changes():
         rev = c.get(f"/api/visits/{v['id']}", headers=h).json()["text_rev"]
         c.put(f"/api/visits/{v['id']}/text", headers=h, json={"text": "Came with mother. Fever for two days. Likely viral fever.", "rev": rev})
         assert c.get(f"/api/visits/{v['id']}", headers=h).json()["note"]["sources"]["T2"] == "Likely viral fever."
+
+
+def test_untouched_ai_draft_saved_back_is_not_an_edit(monkeypatch):
+    from app import ai
+    # Gemini-like output: a missing section, a null field, an extra key
+    monkeypatch.setattr(ai, "draft_note", lambda patient, items: {
+        "soap": {"S": "Fever.", "A": "Viral fever."}, "rx": [{"medicine": "Paracetamol 650 mg", "dose": "1-1-1", "duration": None, "route": "oral"}],
+        "citations": {"S": ["T1"], "A": ["T1"]}})
+    with TestClient(app) as c:
+        h, doc = clinic(c, "d8@x.in")
+        v = started_visit(c, h, doc)
+        c.put(f"/api/visits/{v['id']}/text", headers=h, json={"text": "Fever.", "rev": 0})
+        n = c.post(f"/api/visits/{v['id']}/note/draft", headers=h).json()
+        editor = {"soap": {k: n["content"]["soap"][k] for k in "SOAP"},
+                  "rx": [{f: r[f] for f in ("medicine", "dose", "duration", "instructions")} for r in n["content"]["rx"]]}
+        assert c.put(f"/api/notes/{n['id']}", headers=h, json=editor).json()["edited"] == 0
+
+
+def test_old_paragraph_citations_get_their_paragraphs():
+    import importlib.util
+    from app.db import connect
+    spec = importlib.util.spec_from_file_location("m015", "app/migrations/015_note_sources_backfill.py")
+    m015 = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(m015)
+    with TestClient(app) as c:
+        h, doc = clinic(c, "d9@x.in")
+        v = started_visit(c, h, doc)
+        c.put(f"/api/visits/{v['id']}/text", headers=h, json={"text": "Fever for two days. Cough.\nLikely viral fever.", "rev": 0})
+        n = c.post(f"/api/visits/{v['id']}/note/draft", headers=h).json()
+        db = connect()
+        db.execute("""update notes set sources = null, citations = '{"S": ["T1"], "A": ["T2"]}' where id = ?""", (n["id"],))
+        m015.run(db)
+        db.commit()
+        db.close()
+        got = c.get(f"/api/visits/{v['id']}", headers=h).json()["note"]["sources"]
+        assert got == {"T1": "Fever for two days. Cough.", "T2": "Likely viral fever."}
