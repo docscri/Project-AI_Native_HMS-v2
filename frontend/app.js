@@ -903,7 +903,8 @@ function citations(v) {
 }
 const fmtClock = ms => { const t = Math.floor(ms / 1000); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`; };
 const citeLabel = id => { const bs = S.data?.cur?.brief?.sources?.[id]; return !bs ? id : bs.kind === "note" ? new Date(bs.date).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: new Date(bs.date).getFullYear() === new Date().getFullYear() ? undefined : "numeric" }) : "Report"; };
-function citeBtns(ids) { return (ids || []).map(c => `<button class="cite" data-a="cite" data-v="${c}">${esc(citeLabel(c))}</button>`).join(""); }
+// Citations as small dark superscripts: transcript sentence number, R for a report, N for an earlier note.
+function citeBtns(ids) { return (ids || []).map(c => `<button class="cite-sup" data-a="cite" data-v="${c}" title="${esc(citeLabel(c))}">${c[0] === "T" ? c.slice(1) : c[0] === "D" ? "R" : "N"}</button>`).join(""); }
 function noteEditor(n, ro) {
   const soap = n.content.soap, rx = n.content.rx;
   return `<div class="choices">${["S", "O", "A", "P"].map(k => `<div class="soap"><b>${k}</b><div>${ro ? `<div class="ro">${esc(soap[k] || "—")}</div>` : `<textarea id="soap-${k}">${esc(soap[k] || "")}</textarea>`}<div>${citeBtns(n.citations?.[k])}</div></div></div>`).join("")}</div>

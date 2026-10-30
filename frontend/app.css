@@ -1009,12 +1009,11 @@ table.members tr.click:hover td:first-child b { text-decoration-color: var(--ink
 .cite-src .hl { background: var(--frame-2) !important; border-color: var(--lime) !important; }
 .cite-item .src-doc b { width: auto; height: auto; background: none; display: block; color: var(--frame-fg); font-size: 14px; border-radius: 0; }
 /* brief: values outside the usual range, range band, single-reading tile */
-mark.abn { color: inherit; background: none; font-weight: 600; text-decoration: underline; text-decoration-color: var(--green-ink); text-decoration-thickness: 1.5px; text-underline-offset: 4px; }
+mark.abn { background: none; color: #3f6b1f; text-decoration: underline dashed color-mix(in srgb, #3f6b1f 70%, transparent); text-decoration-thickness: 1.5px; text-underline-offset: 5px; }
 /* summary citations: small superscript numbers so the sentences read first */
 sup.cs { font-size: 0; line-height: 0; margin-left: 1px; }
-sup.cs button { border: 0; background: none; padding: 0 1px; font: 700 10.5px/1 var(--f); color: var(--green-ink); cursor: pointer; vertical-align: super; }
-sup.cs button + button::before { content: ","; color: var(--muted); margin-right: 1px; }
-sup.cs button:hover { color: var(--ink); text-decoration: underline; }
+sup.cs button, .cite-sup { display: inline-grid; place-items: center; min-width: 15px; height: 15px; padding: 0 3px; border: 0; border-radius: 999px; background: var(--ink); color: var(--surface); font: 700 9px/1 var(--f); cursor: pointer; vertical-align: super; position: relative; top: -2px; margin: 0 1px; }
+sup.cs button:hover, .cite-sup:hover { background: #3f6b1f; }
 .bchart-head span.abn { color: #D9542F; }
 .bchart-band { fill: color-mix(in srgb, var(--lime) 30%, transparent); }
 .bchart-one { border: 0; text-align: left; cursor: pointer; font: inherit; color: inherit; padding: 14px 16px; justify-content: space-between; min-height: 92px; }
