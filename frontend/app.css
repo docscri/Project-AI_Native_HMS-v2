@@ -982,3 +982,10 @@ table.members tr.click:hover td:first-child b { text-decoration-color: var(--ink
 .tk b { font-size: 18px; font-weight: 700; line-height: 1.3; }
 .tk.big { min-width: 80px; }
 .tk.big b { font-size: 24px; }
+
+/* close: a plain × at the top-right corner, black when pressed or hovered */
+.icon-x { background: transparent; transition: background .2s, color .2s; }
+.icon-x:hover, .icon-x:active, .icon-x:focus-visible { background: var(--ink); color: var(--surface); outline: none; }
+.modal { position: relative; }
+.modal-x { position: absolute; top: 18px; right: 18px; z-index: 5; }
+.modal > h2:first-of-type { padding-right: 44px; }

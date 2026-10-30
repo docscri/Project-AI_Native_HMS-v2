@@ -71,7 +71,7 @@ function toast(msg, err) {
 async function run(fn) { try { return await fn(); } catch (e) { toast(e.message, true); } }
 function modal(html, wide) {
   const old = $("#modal .modal"), top = old ? old.scrollTop : 0, scrim = $("#modal .scrim")?.scrollTop || 0;
-  $("#modal").innerHTML = html ? `<div class="scrim" data-a="scrim"><div class="modal ${wide ? "wide" : ""} ${old ? "re" : ""}" role="dialog" aria-modal="true">${html}</div></div>` : "";
+  $("#modal").innerHTML = html ? `<div class="scrim" data-a="scrim"><div class="modal ${wide ? "wide" : ""} ${old ? "re" : ""}" role="dialog" aria-modal="true">${html.includes("nv-x") ? "" : `<button class="icon-x modal-x" data-a="close-refresh" aria-label="Close">×</button>`}${html}</div></div>` : "";
   if (html && old) { $("#modal .modal").scrollTop = top; $("#modal .scrim").scrollTop = scrim; }
 }
 const closeModal = () => { modal(""); M = null; };
@@ -423,7 +423,7 @@ function renderBooking() {
     ${sessChips}
     ${slot}
     ${extra}
-    <div class="foot"><button class="btn" data-a="close">Close</button>
+    <div class="foot">
       ${p && !a.available && b.mode === "book" && /full/i.test(a.reason || "") ? `<button class="btn" data-a="bk-wait">Waitlist</button>` : ""}
       <button class="btn primary" data-a="bk-confirm" ${p && a.available ? "" : "disabled"}>${b.mode === "walk" ? "Paid" : b.mode === "resched" ? "Move booking" : "Confirm"}</button></div></div>`);
   const q = $("#bk-q"); if (q) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); }
@@ -453,7 +453,7 @@ function searchPatients(q) {
 function openArrive(v) {
   M = { kind: "arrive", pay: "upi", v };
   modal(`<h2>${esc(v.patient_name)} has arrived</h2>${payBlock(v.fee, "upi")}
-    <div class="foot"><button class="btn" data-a="close">Back</button><button class="btn primary" data-a="arrive-paid">Send to Waiting</button></div>`);
+    <div class="foot"><button class="btn primary" data-a="arrive-paid">Send to Waiting</button></div>`);
 }
 function openRefund(v) {
   const left = v.refundable || 0;
@@ -462,13 +462,13 @@ function openRefund(v) {
     <label class="field">Amount (₹)<input type="number" min="1" max="${left}" id="rf-amt" value="${left}"></label>
     ${reasonChips(REFUND_REASONS, "", "rf-reason")}
     <label class="field">Reason<input id="rf-why"></label>
-    <div class="foot"><button class="btn" data-a="close">Back</button><button class="btn danger" data-a="refund-go">Refund</button></div>`);
+    <div class="foot"><button class="btn danger" data-a="refund-go">Refund</button></div>`);
 }
 function openUpload(visitId) {
   M = { kind: "upload", visitId };
   modal(`<h2>Add document</h2>
     <label class="file-drop"><input type="file" id="up-file" accept="image/*,.pdf,.txt" data-a="up-file"><span class="file-btn">Choose file</span><span class="file-name" id="up-name">No file</span></label>
-    <div class="foot"><button class="btn" data-a="close">Close</button><button class="btn primary" data-a="upload-go">Upload</button></div>`);
+    <div class="foot"><button class="btn primary" data-a="upload-go">Upload</button></div>`);
 }
 async function doUpload(visitId, file) {
   const fd = new FormData(); fd.append("file", file);
@@ -511,7 +511,7 @@ function renderSched() {
     <div class="cal">${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(d => `<span class="dow">${d}</span>`).join("")}${"<span></span>".repeat(lead)}
       ${s.days.map(d => `<button class="${d.off ? "off" : ""} ${d.override ? "ovr" : ""}" data-a="sc-day" data-v="${d.date}" aria-pressed="${d.date === s.sel}" ${d.date < TODAY ? "disabled" : ""}><b>${Number(d.date.slice(8))}</b>${d.off ? "Off" : `${d.schedule.start}–${d.schedule.end}`}</button>`).join("")}</div>
     ${s.leave ? leaveEditor() : editor}
-    <div class="foot">${s.leave ? "" : `<button class="btn" data-a="lv-open" data-v="doc">Leave</button>${S.me.is_admin && !s.own ? `<button class="btn" data-a="lv-open" data-v="all">Clinic holiday</button>` : ""}`}<button class="btn" data-a="close-refresh">Close</button></div>`, true);
+    <div class="foot">${s.leave ? "" : `<button class="btn" data-a="lv-open" data-v="doc">Leave</button>${S.me.is_admin && !s.own ? `<button class="btn" data-a="lv-open" data-v="all">Clinic holiday</button>` : ""}`}</div>`, true);
 }
 function leaveEditor() {
   const l = M.leave;
@@ -532,7 +532,7 @@ function openMember(kind, m) {
     <label class="field">Email<input id="mb-email" type="email" value="${esc(m?.email || "")}"></label>
     <div class="grid2">${k === "doctor" ? `<label class="field">Department<input id="mb-spec" value="${esc(m?.speciality || "General medicine")}"></label>`
         : `<label class="field">Designation<select id="mb-spec">${["Receptionist", "Nurse", "IT", "Other"].map(d => `<option ${m?.designation === d ? "selected" : ""}>${d}</option>`).join("")}</select></label>`}</div>
-    ${k === "doctor" ? `<div class="fee-row"><div class="seg"><button data-a="mb-fee-mode" data-v="clinic" aria-pressed="${m?.fee_override == null}">Clinic fee ₹${S.clinic.fee}</button><button data-a="mb-fee-mode" data-v="own" aria-pressed="${m?.fee_override != null}">Own fee</button></div>
+    ${k === "doctor" ? `<div class="fee-row"><div class="seg"><button data-a="mb-fee-mode" data-v="clinic" aria-pressed="${m?.fee_override == null}">Clinic fee</button><button data-a="mb-fee-mode" data-v="own" aria-pressed="${m?.fee_override != null}">Own fee</button></div>
       <label class="field" id="mb-fee-wrap" ${m?.fee_override == null ? "hidden" : ""}>Fee (₹)<input id="mb-fee" type="number" min="0" value="${m?.fee_override ?? S.clinic.fee}"></label></div>` : ""}
     ${m ? `<div class="grid2"><label class="field">Joining date<input type="date" id="mb-joined" value="${esc(m.joined_on || "")}"></label><label class="field">ID number<input id="mb-idno" value="${esc(m.id_number || "")}"></label></div>
     <div class="grid2"><label class="field">Emergency contact<input id="mb-emerg" value="${esc(m.emergency_contact || "")}"></label><label class="field">Address<input id="mb-addr" value="${esc(m.address || "")}"></label></div>
@@ -543,7 +543,7 @@ function openMember(kind, m) {
     <div class="toggles"><label class="choice"><input type="checkbox" id="mb-admin" data-a="mb-admin" ${m?.is_admin ? "checked" : ""} ${locked ? "disabled" : ""}><span><b>Admin access</b></span></label>
     ${m && !m.is_owner && m.status !== "invited" ? `<label class="choice"><input type="checkbox" id="mb-active" ${m.status === "active" ? "checked" : ""}><span><b>Active</b></span></label>` : ""}</div>
     <div class="foot">${m && !m.is_owner ? `<button class="btn danger" data-a="mb-remove" style="margin-right:auto">Remove</button>` : ""}${m?.status === "invited" ? `<button class="btn" data-a="renew-invite" data-v="${m.id}">Invite link</button>` : ""}${m?.status === "active" && !m.is_owner ? `<button class="btn" data-a="reset-link" data-v="${m.id}">Reset password</button>` : ""}${m && k === "doctor" ? `<button class="btn" data-a="mb-schedule" data-v="${m.id}">Schedule</button>` : ""}
-      <button class="btn" data-a="close">Cancel</button><button class="btn primary" data-a="mb-save">${m ? "Save" : "Send invitation"}</button></div>`);
+      <button class="btn primary" data-a="mb-save">${m ? "Save" : "Send invitation"}</button></div>`);
 }
 async function saveMember() {
   const { mkind, m } = M, own = $('[data-a="mb-fee-mode"][data-v="own"]')?.getAttribute("aria-pressed") === "true";
@@ -573,8 +573,8 @@ function openShare(what, id, code, emailOn) {
   M = { kind: "share", what, id, code, link, back };
   modal(`<h2>${what === "invite" ? "Invite link" : "Password reset"}</h2>
     <div class="pt-chip share-chip"><span class="avatar">${esc(initials(m?.name || "?"))}</span><span class="pt-main"><b>${esc(m?.name || "")}</b><span class="pt-meta"><span>${esc(m?.email || "")}</span><span>${what === "invite" ? "7 days" : "2 hours"}</span></span></span></div>
-    <div class="share-row">${emailOn ? `<button class="share-opt" data-a="share-email"><b>Email link</b><span>Sends it to their inbox</span></button>` : ""}
-      <button class="share-opt" data-a="share-copy"><b>Copy link</b><span>Paste in WhatsApp or SMS</span></button></div>
+    <div class="share-row">${emailOn ? `<button class="share-opt" data-a="share-email"><b>Email link</b></button>` : ""}
+      <button class="share-opt" data-a="share-copy"><b>Copy link</b></button></div>
     <div class="foot"><button class="btn" data-a="share-back">Back</button><button class="btn primary" data-a="close">Done</button></div>`);
 }
 function copyLink(link, msg) {
@@ -592,7 +592,7 @@ async function openAccount() {
     <div class="grid2"><label class="field">Email<input id="ac-email" type="email" value="${esc(m.email)}"></label><label class="field">Phone<input id="ac-phone" value="${esc(m.phone || "")}"></label></div>
     <label class="field">Current password<input id="ac-cur" type="password" autocomplete="current-password"></label>
     <div class="grid2"><label class="field">New password<input id="ac-new" type="password" autocomplete="new-password"></label><label class="field">Repeat new password<input id="ac-new2" type="password" autocomplete="new-password"></label></div>
-    <div class="foot"><button class="btn danger" data-a="logout" style="margin-right:auto">Log out</button><button class="btn" data-a="my-leave">Leave</button>${doc ? `<button class="btn" data-a="my-schedule">My schedule</button>` : ""}<button class="btn" data-a="close">Close</button><button class="btn primary" data-a="ac-save">Save</button></div>`);
+    <div class="foot"><button class="btn danger" data-a="logout" style="margin-right:auto">Log out</button><button class="btn" data-a="my-leave">Leave</button>${doc ? `<button class="btn" data-a="my-schedule">My schedule</button>` : ""}<button class="btn primary" data-a="ac-save">Save</button></div>`);
 }
 function copyInvite(code, msg) {
   const link = `${location.origin}/#/invite/${code}`;
@@ -990,7 +990,7 @@ function renderFollowUp() {
   modal(`<h2>Follow-up</h2>
     <div class="seg">${opts.map(([n, l]) => `<button data-a="fu-pick" data-v="${n}" aria-pressed="${addDays(TODAY, n) === M.date}">${l}</button>`).join("")}</div>
     <input class="date-pill" aria-label="Date" type="date" id="fu-date" min="${addDays(TODAY, 1)}" value="${M.date}">
-    <div class="foot"><button class="btn" data-a="close">Back</button><button class="btn primary" data-a="fu-go">Book</button></div>`);
+    <div class="foot"><button class="btn primary" data-a="fu-go">Book</button></div>`);
 }
 function renderMerge() {
   const m = M;
@@ -1006,7 +1006,7 @@ function openPatientEdit(p) {
   modal(`<h2>Edit patient</h2><div class="grid2"><label class="field">Name<input id="pe-name" value="${esc(p.name)}"></label><label class="field">Phone<input id="pe-phone" value="${esc(p.phone)}"></label></div>
     <div class="grid2"><label class="field">Date of birth<input id="pe-dob" type="date" value="${esc(p.dob || "")}"></label><label class="field">Sex<select id="pe-sex">${["M", "F", "O"].map(s => `<option ${p.sex === s ? "selected" : ""}>${s}</option>`).join("")}</select></label></div>
     <label class="field">Address<input id="pe-addr" value="${esc(p.address || "")}"></label>
-    <div class="foot"><button class="btn" data-a="close">Cancel</button><button class="btn primary" data-a="pe-save">Save</button></div>`);
+    <div class="foot"><button class="btn primary" data-a="pe-save">Save</button></div>`);
 }
 
 /* ---------- administration ---------- */
@@ -1066,7 +1066,7 @@ async function teamView(sub) {
     const line = l => { const [st, c] = LEAVE_ST[l.status]; return `<div class="r leave-row">${person({ ...l, role: (LEAVE_TYPES.find(t => t[0] === l.type) || [, l.type])[1] + (l.reason ? " · " + l.reason : "") })}
       <span class="num">${niceDate(l.start_date)}${l.end_date !== l.start_date ? " – " + niceDate(l.end_date) : ""}</span><span class="muted">${l.days} day${l.days > 1 ? "s" : ""}</span>
       <span class="actions" style="gap:6px;justify-content:flex-end">${l.status === "pending" ? `<button class="btn small dark" data-a="lv-approve" data-v="${l.id}">Approve</button><button class="btn small" data-a="lv-reject" data-v="${l.id}">Reject</button>` : `<span class="pill ${c}">${st}</span>${l.status === "approved" && l.end_date >= TODAY ? `<button class="btn small icon-btn" data-a="lv-cancel" data-v="${l.id}" aria-label="Cancel leave">×</button>` : ""}`}</span></div>`; };
-    return `${subTabs("team", "leave")}<div class="bar-row">${monthPick("lvm", S.adm.month)}<span class="grow"></span><button class="btn primary" data-a="lv-new">+ Leave</button></div>
+    return `${subTabs("team", "leave")}<div class="bar-row">${monthPick("lvm", S.adm.month)}</div>
       ${pend.length ? `<section class="panel"><span class="label">Waiting for approval</span><div class="rows">${pend.map(line).join("")}</div></section>` : ""}
       <section class="panel"><span class="label">${new Date(S.adm.month + "-01T00:00").toLocaleDateString("en-IN", { month: "long", year: "numeric" })}</span><div class="rows">${rest.map(line).join("") || `<div class="empty">—</div>`}</div></section>`;
   }
@@ -1125,7 +1125,7 @@ function openLeave(memberId) {
     <div class="seg" id="lv-type">${LEAVE_TYPES.map(([k, l]) => `<button data-a="lv-type" data-v="${k}" aria-pressed="${k === "casual"}">${l}</button>`).join("")}</div>
     <div class="date-row"><input class="date-pill" aria-label="From" type="date" id="lvn-from" value="${TODAY}"><input class="date-pill" aria-label="To" type="date" id="lvn-to" value="${TODAY}"></div>
     <label class="field">Reason<input id="lvn-why"></label>
-    <div class="foot"><button class="btn" data-a="close">Back</button><button class="btn primary" data-a="lvn-save">${S.me.is_admin ? "Save" : "Request"}</button></div>`);
+    <div class="foot"><button class="btn primary" data-a="lvn-save">${S.me.is_admin ? "Save" : "Request"}</button></div>`);
 }
 function printRegister() {
   const r = S.reg, w = window.open("", "_blank");
@@ -1232,7 +1232,7 @@ document.addEventListener("click", e => {
           ${(vis.refundable || 0) > 0 ? `<button class="btn" data-a="refund" data-v="${v}">Refund</button>` : ""}
           ${vis.status === "waiting" && !vis.is_walk_in ? `<button class="btn" data-a="undo-arrival" data-v="${v}">Undo arrival</button>` : ""}
           ${vis.status === "booked" ? `<button class="btn" data-a="upload" data-v="${v}">Add document</button><button class="btn danger" data-a="cancel" data-v="${v}">Cancel booking</button>` : ""}</div>
-          <div class="foot"><button class="btn" data-a="close">Back</button></div>`); break; }
+          `); break; }
       case "refund": openRefund(Object.values(D.columns).flat().find(x => x.id === Number(v))); break;
       case "rf-reason": $("#rf-why").value = v; document.querySelectorAll('[data-a="rf-reason"]').forEach(b => b.setAttribute("aria-pressed", b.dataset.v === v)); break;
       case "refund-go": { const r = await api(`/visits/${M.v.id}/refund`, { body: { amount: Number($("#rf-amt").value) || null, reason: $("#rf-why").value } }); closeModal(); toast(`Refunded ${rupees(r.refund_amount)}`); refresh(); break; }
@@ -1244,7 +1244,7 @@ document.addEventListener("click", e => {
       case "vf-st": S.vf.st = v; document.querySelectorAll('[data-a="vf-st"]').forEach(b => b.setAttribute("aria-pressed", b.dataset.v === v));
         { const r = $("#ops-rows"); if (r && S.data?.visits) r.innerHTML = opsRows(S.data.visits); } break;
       case "cancel": { const vis = D.columns.booked.find(x => x.id === Number(v)); M = { kind: "cancel", id: v, reason: "" };
-        modal(`<h2>Cancel booking · ${esc(vis.patient_name)}</h2>${reasonChips(CANCEL_REASONS, "", "cn-reason")}<div class="foot"><button class="btn" data-a="close">Back</button><button class="btn danger" data-a="cancel-go" data-v="${v}">Cancel booking</button></div>`); break; }
+        modal(`<h2>Cancel booking · ${esc(vis.patient_name)}</h2>${reasonChips(CANCEL_REASONS, "", "cn-reason")}<div class="foot"><button class="btn danger" data-a="cancel-go" data-v="${v}">Cancel booking</button></div>`); break; }
       case "cn-reason": M.reason = v; document.querySelectorAll('[data-a="cn-reason"]').forEach(b => b.setAttribute("aria-pressed", b.dataset.v === v)); break;
       case "cancel-go": await api(`/visits/${v}/cancel`, { body: { reason: M.reason || "" } }); closeModal(); toast("Booking cancelled"); refresh(); break;
       case "end-session": { const r = await api(`/operations/end-session?doctor_id=${v}&date=${S.date}&session=${t.dataset.s || ""}`, { body: {} }); toast(`${r.no_shows} marked as no-show`); refresh(); break; }
