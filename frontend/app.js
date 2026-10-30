@@ -71,7 +71,7 @@ function toast(msg, err) {
 async function run(fn) { try { return await fn(); } catch (e) { toast(e.message, true); } }
 function modal(html, wide) {
   const old = $("#modal .modal"), top = old ? old.scrollTop : 0, scrim = $("#modal .scrim")?.scrollTop || 0;
-  $("#modal").innerHTML = html ? `<div class="scrim" data-a="scrim"><div class="modal ${wide ? "wide" : ""} ${old ? "re" : ""}" role="dialog" aria-modal="true">${html.includes("nv-x") || /data-a="close(-refresh)?"[^>]*>(Cancel|Close)</.test(html) ? "" : `<button class="icon-x modal-x" data-a="close-refresh" aria-label="Close">×</button>`}${html}</div></div>` : "";
+  $("#modal").innerHTML = html ? `<div class="scrim" data-a="scrim"><div class="modal ${wide ? "wide" : ""} ${old ? "re" : ""}" role="dialog" aria-modal="true">${/data-a="close(-refresh)?"[^>]*>(Cancel|Close)</.test(html) ? "" : `<button class="icon-x modal-x" data-a="close-refresh" aria-label="Close">×</button>`}${html}</div></div>` : "";
   if (html && old) { $("#modal .modal").scrollTop = top; $("#modal .scrim").scrollTop = scrim; }
 }
 const closeModal = () => { modal(""); M = null; };
@@ -348,7 +348,7 @@ async function viewQueue(doctorId) {
       <div class="board">${cols.map(([k, l]) => `<section class="col"><header>${pill(k).replace(STATUS[k], l)}<span class="muted num">${q.columns[k].length}</span></header>
         ${q.columns[k].map((v, i, l) => qCard(v, i, l)).join("")}</section>`).join("")}</div>
       ${wl.items.length ? `<section class="panel"><span class="label">Waitlist</span><div class="rows">${wl.items.map((w, i) => `<div class="r wl-row"><span class="num muted">${i + 1}</span><span class="who"><b>${esc(w.patient_name)}</b></span><span class="muted">${esc(w.phone || w.uhid)}</span>
-          <span class="actions" style="gap:6px"><button class="btn small dark" data-a="wl-book" data-v="${w.id}" ${wl.open ? "" : "disabled"}>Book</button><button class="btn small icon-btn" data-a="wl-del" data-v="${w.id}" aria-label="Remove">×</button></span></div>`).join("")}</div></section>` : ""}
+          <span class="actions" style="gap:6px"><button class="btn small dark" data-a="wl-book" data-v="${w.id}" ${wl.open ? "" : "disabled"}>Book</button><button class="icon-x" data-a="wl-del" data-v="${w.id}" aria-label="Remove">×</button></span></div>`).join("")}</div></section>` : ""}
       ${q.not_seen.length ? `<section class="panel"><span class="label">Not seen</span><div class="rows">${q.not_seen.map(v => `<div class="r q" style="grid-template-columns:minmax(0,1fr) auto"><span>${esc(v.patient_name)}</span>${pill(v.status)}</div>`).join("")}</div></section>` : ""}`);
   };
   await run(load);
@@ -816,7 +816,7 @@ function noteEditor(n, ro) {
   const soap = n.content.soap, rx = n.content.rx;
   return `<div class="choices">${["S", "O", "A", "P"].map(k => `<div class="soap"><b>${k}</b><div>${ro ? `<div class="ro">${esc(soap[k] || "—")}</div>` : `<textarea id="soap-${k}">${esc(soap[k] || "")}</textarea>`}<div>${citeBtns(n.citations?.[k])}</div></div></div>`).join("")}</div>
     <div class="scroll"><table class="t" id="rx"><thead><tr><th>Medicine</th><th>Dose</th><th>Duration</th><th>Instructions</th>${ro ? "" : "<th></th>"}</tr></thead><tbody>
-      ${rx.map((r, i) => `<tr>${["medicine", "dose", "duration", "instructions"].map(f => `<td>${ro ? esc(r[f]) : `<input data-f="${f}" value="${esc(r[f])}" aria-label="${f}">`}</td>`).join("")}${ro ? "" : `<td><button class="btn small ghost" data-a="rx-del" data-v="${i}" aria-label="Remove">✕</button></td>`}</tr>`).join("") || `<tr><td colspan="5" class="muted">—</td></tr>`}
+      ${rx.map((r, i) => `<tr>${["medicine", "dose", "duration", "instructions"].map(f => `<td>${ro ? esc(r[f]) : `<input data-f="${f}" value="${esc(r[f])}" aria-label="${f}">`}</td>`).join("")}${ro ? "" : `<td><button class="icon-x" data-a="rx-del" data-v="${i}" aria-label="Remove">×</button></td>`}</tr>`).join("") || `<tr><td colspan="5" class="muted">—</td></tr>`}
     </tbody></table></div>${ro ? "" : `<div><button class="btn small" data-a="rx-add">+ Add medicine</button></div>`}`;
 }
 function readNote() {
@@ -958,7 +958,7 @@ async function viewPatients(id) {
 function profile(p) {
   const visits = p.visits.filter(v => ["done", "with_doctor", "waiting", "booked"].includes(v.status));
   return `<section class="panel" style="gap:14px"><div class="actions" style="justify-content:space-between;align-items:flex-start"><div><h2>${esc(p.name)}</h2>
-      <div class="muted">${ageOf(p.dob)} ${esc(p.sex || "")} · <span class="mono">${esc(p.uhid)}</span> · ${esc(p.phone)}</div>${p.address ? `<div class="muted">${esc(p.address)}</div>` : ""}${p.consent_at ? `<div class="muted consent-line">✓ Consent ${longDate(p.consent_at)}</div>` : ""}</div><span class="actions" style="gap:6px"><button class="btn small" data-a="pt-edit" data-v="${p.id}">Edit</button><button class="btn small" data-a="pt-merge" data-v="${p.id}">Merge</button></span></div>
+      <div class="muted">${ageOf(p.dob)} ${esc(p.sex || "")} · <span class="mono">${esc(p.uhid)}</span> · ${esc(p.phone)}</div>${p.address ? `<div class="muted">${esc(p.address)}</div>` : ""}${p.consent_at ? `<div class="muted consent-line">✓ Consent ${longDate(p.consent_at)}</div>` : ""}</div><span class="actions" style="gap:6px"><button class="btn small" data-a="pt-edit" data-v="${p.id}">Profile</button><button class="btn small" data-a="pt-merge" data-v="${p.id}">Merge</button></span></div>
     <span class="label">Visit history</span>
     ${visits.length ? `<div class="timeline">${visits.map(v => `<div class="tl"><div class="tl-head"><b>${longDate(v.date)}</b><span>${esc(v.doctor)}</span>${pill(v.status)}</div>
       <div class="items">${v.note ? `<button class="btn small" data-a="note-view" data-v="${v.id}">${v.note.status === "signed" ? "Note & prescription" : "Draft note"}</button>` : ""}
@@ -972,11 +972,12 @@ async function openNoteView(visitId) {
   if (!n) return;
   const signed = n.status === "signed", when = ts => { const d = new Date(ts); return `${d.getDate()} ${d.toLocaleDateString("en-IN", { month: "short" })}, ${d.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }).toLowerCase()}`; };
   M = { kind: "note-view", noteId: n.id };
+  const by = n.signed_by_name && n.signed_by_name !== v.doctor_name ? ` by ${esc(n.signed_by_name)}` : "";
   modal(`<div class="nv">
-    <div class="nv-top"><div><h2>${esc(v.patient_name)}${v.age != null ? ", " + v.age : ""}</h2><span class="muted">${longDate(v.date)} · ${esc(v.doctor_name)}</span></div>
-      <span class="grow"></span><span class="pill ${signed ? "s-paid" : "s-waiting"}">${signed ? "Signed" : "Draft"}</span><button class="cx-side-btn close nv-x" data-a="close" aria-label="Close">${ICON.x}</button></div>
-    <div class="nv-body">${soapRead(v, n, true)}</div>
-    <div class="dock nv-dock"><span class="dock-msg ${signed ? "ok" : ""}">${signed ? `Signed · ${when(n.signed_at)} · ${esc(n.signed_by_name || v.doctor_name)}` : "Draft · not signed"}</span><span class="grow"></span>${signed ? `<button class="dock-go" data-a="note-print" data-v="${n.id}">Print</button>` : ""}</div></div>`, true);
+    <div class="nv-top"><div><h2>${esc(v.patient_name)}${v.age != null ? ", " + v.age : ""}</h2>
+      <span class="muted">${longDate(v.date)} · ${esc(v.doctor_name)}${signed ? ` · Signed ${when(n.signed_at)}${by}` : ""}</span></div>
+      <span class="grow"></span><span class="pill ${signed ? "s-paid" : "s-waiting"}">${signed ? "Signed" : "Draft"}</span>${signed ? `<button class="btn small primary" data-a="note-print" data-v="${n.id}">Print</button>` : ""}</div>
+    <div class="nv-body">${soapRead(v, n, true)}</div></div>`, true);
 }
 function renderFollowUp() {
   const opts = [[3, "3 days"], [7, "1 week"], [14, "2 weeks"], [30, "1 month"]];
@@ -996,7 +997,7 @@ function renderMerge() {
 }
 function openPatientEdit(p) {
   M = { kind: "pedit", id: p.id };
-  modal(`<h2>Edit patient</h2><div class="grid2"><label class="field">Name<input id="pe-name" value="${esc(p.name)}"></label><label class="field">Phone<input id="pe-phone" value="${esc(p.phone)}"></label></div>
+  modal(`<div><h2>${esc(p.name)}</h2><span class="muted">${esc(p.uhid)}${p.dob ? " · " + ageOf(p.dob) : ""}${p.sex ? " " + esc(p.sex) : ""}</span></div><div class="grid2"><label class="field">Name<input id="pe-name" value="${esc(p.name)}"></label><label class="field">Phone<input id="pe-phone" value="${esc(p.phone)}"></label></div>
     <div class="grid2"><label class="field">Date of birth<input id="pe-dob" type="date" value="${esc(p.dob || "")}"></label><label class="field">Sex<select id="pe-sex">${["M", "F", "O"].map(s => `<option ${p.sex === s ? "selected" : ""}>${s}</option>`).join("")}</select></label></div>
     <label class="field">Address<input id="pe-addr" value="${esc(p.address || "")}"></label>
     <div class="foot"><button class="btn primary" data-a="pe-save">Save</button></div>`);

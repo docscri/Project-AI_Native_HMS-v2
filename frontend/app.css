@@ -891,13 +891,10 @@ table.members tr.click:hover td:first-child b { text-decoration-color: var(--ink
 .nv-top { display: flex; align-items: center; gap: 12px; padding: 26px 30px 18px; }
 .nv-top h2 { margin: 0 0 2px; font-size: 24px; }
 .nv-top .grow { flex: 1; }
-.cx-side-btn.close.nv-x { background: var(--ink); color: var(--surface); border: 0; }
-.cx-side-btn.close.nv-x:hover { color: var(--lime); transform: none; }
 .nv-body { overflow-y: auto; scrollbar-width: none; padding: 8px 30px 24px; }
 .nv-body::-webkit-scrollbar { display: none; }
 .nv-body .soap-read { padding-bottom: 8px; }
 .nv-body span.cited { cursor: default; }
-.nv-dock { margin: 0 18px 18px; width: auto; animation: none; }
 .doc-table th.n, .doc-table td.n, .panel table.t th.n, .panel table.t td.n { text-align: right; }
 .doc-table tr.click:hover td { background: color-mix(in srgb, var(--lime) 18%, transparent); }
 .doc-table tr.tot-row td { background: var(--ink); color: var(--surface); }
@@ -977,8 +974,7 @@ table.members tr.click:hover td:first-child b { text-decoration-color: var(--ink
 .modal-x + .mb-head { margin-top: 4px; }
 .pay-line:has(#pay-disc-wrap[hidden]) { grid-template-columns: 1fr; }
 
-.nv-dock { min-height: 52px; padding: 5px 5px 5px 22px; }
-.nv-dock .dock-msg { font-size: 13px; }
-.nv-dock .dock-go { min-height: 42px; padding: 0 22px; font-size: 14.5px; box-shadow: none; }
 .modal-x + .actions { padding-right: 56px; }
-.nv-dock { width: min(520px, calc(100% - 36px)); margin: 0 auto 18px; }
+.nv-top { padding-right: 72px; }
+.nv-top .btn.small { min-height: var(--ctl-sm); }
+.modal-x + div > h2:first-child { padding-right: 56px; }
