@@ -11,6 +11,13 @@ from .routes import clinic, consultation, operations, patients, schedules, team
 FRONTEND = Path(__file__).resolve().parent.parent / "frontend"
 
 app = FastAPI(title="Clinic V1")
+
+
+@app.exception_handler(ValueError)
+def bad_value(request, exc):
+    """A malformed date, month or number in a request is the caller's mistake (422), not a server error."""
+    from fastapi.responses import JSONResponse
+    return JSONResponse({"detail": "Check the dates."}, status_code=422)
 for r in (clinic, schedules, patients, operations, consultation, team):
     app.include_router(r.router)
 

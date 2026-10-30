@@ -629,7 +629,7 @@ function renderConsult() {
   const D = S.data, m = S.me, v = D.cur, y = window.scrollY, again = S.cxShown === (v?.id ?? "p" + D.pid);
   S.cxShown = v?.id ?? "p" + D.pid;
   const fe = $("#free-text"); if (fe && S.ft?.id === Number(fe.dataset.v)) { S.ft.sel = document.activeElement === fe ? fe.selectionEnd : null; S.ft.scroll = fe.scrollTop; }
-  if (S.ft && S.ft.id !== v?.id) { saveText(S.ft.id); S.ft = null; }
+  if (S.ft && S.ft.id !== v?.id) { saveText(S.ft.id, S.ft); S.ft = null; }
   if (S.noteVisit !== v?.id) { S.noteVisit = v?.id; S.noteEdit = false; }
   const floatMic = v && (["waiting", "with_doctor"].includes(v.status) || S.recState) && S.ctab !== "note";
   $("#root").innerHTML = `<div class="cx">
@@ -781,7 +781,7 @@ function noteDock(v) {
     const canDraft = v.status === "with_doctor" && (freeText(v).trim() || v.documents.some(d => d.ai_status === "ready"));
     return canDraft ? `<div class="dock"><span class="grow"></span><button class="dock-go" data-a="cs-draft" data-v="${v.id}">Generate SOAP note</button></div>` : "";
   }
-  if (signed) return `<div class="dock"><span class="dock-msg ok">Signed · ${stampOf(n.signed_at)}</span><span class="grow"></span><button class="dock-go" data-a="note-print" data-v="${n.id}">Print</button></div>`;
+  if (signed) return `<div class="dock"><span class="dock-msg ok">Signed · ${stampOf(n.signed_at)}${n.signed_by_name ? " · " + esc(n.signed_by_name) : ""}</span><span class="grow"></span><button class="dock-go" data-a="note-print" data-v="${n.id}">Print</button></div>`;
   if (S.noteEdit) return `<div class="dock"><span class="dock-msg">Editing.</span><span class="grow"></span><button class="dock-go" data-a="note-done">Save</button></div>`;
   return `<div class="dock"><span class="dock-msg">${Object.values(n.citations || {}).some(x => x.length) ? "Drafted by AI." : "Draft."}</span><span class="grow"></span>
     <button class="dock-ghost" data-a="note-edit">Edit</button>${v.status === "with_doctor" ? `<button class="dock-ghost" data-a="cs-draft" data-v="${v.id}">Revalidate</button>` : ""}<button class="dock-go" data-a="note-sign-ro" data-v="${n.id}">Sign note</button></div>`;
@@ -882,15 +882,27 @@ function putSpeech(el, text, final) {
 }
 const paragraphs = text => { const out = []; let at = 0; for (const line of text.split("\n")) { if (line.trim()) out.push({ text: line.trim(), from: at, to: at + line.length }); at += line.length + 1; } return out; };
 function scheduleSave(visitId) { clearTimeout(S.ftT); S.ftT = setTimeout(() => saveText(visitId), 700); }
-async function saveText(visitId) {
+async function saveText(visitId, ft = S.ft) {
   clearTimeout(S.ftT);
-  const ft = S.ft; if (!ft || ft.id !== visitId || ft.saved === ft.text) return;
+  if (!ft || ft.id !== visitId || ft.saved === ft.text) return;
   const text = ft.text;
-  await run(() => api(`/visits/${visitId}/text`, { method: "PUT", body: { text } }));
-  if (S.ft === ft) ft.saved = text;
+  try {
+    await api(`/visits/${visitId}/text`, { method: "PUT", body: { text } });
+  } catch (e) {
+    // Not saved: keep it marked unsaved, tell the doctor, and try again shortly.
+    toast(`Not saved · ${e.message}`, true);
+    S.failed = S.failed || new Set(); S.failed.add(ft);
+    ft.tries = (ft.tries || 0) + 1;
+    if (ft.tries < 6) setTimeout(() => saveText(visitId, ft), 5000);
+    return false;
+  }
+  ft.saved = text; ft.tries = 0; S.failed?.delete(ft);
   if (S.data?.cur?.id === visitId) S.data.cur.text = text;
+  return true;
 }
-const flushText = () => S.ft ? saveText(S.ft.id) : Promise.resolve();
+const unsaved = () => !!S.failed?.size || (!!S.ft && S.ft.saved !== S.ft.text && S.ft.text !== (S.data?.cur?.id === S.ft.id ? S.data.cur.text : undefined));
+const flushText = async () => !S.ft || (await saveText(S.ft.id)) !== false;
+window.addEventListener("beforeunload", e => { if (unsaved()) { e.preventDefault(); e.returnValue = ""; } });
 
 /* ---------- patients ---------- */
 async function viewPatients(id) {
@@ -931,7 +943,7 @@ async function openNoteView(visitId) {
     <div class="nv-top"><div><h2>${esc(v.patient_name)}${v.age != null ? ", " + v.age : ""}</h2><span class="muted">${longDate(v.date)} · ${esc(v.doctor_name)}</span></div>
       <span class="grow"></span><span class="pill ${signed ? "s-paid" : "s-waiting"}">${signed ? "Signed" : "Draft"}</span><button class="cx-side-btn close nv-x" data-a="close" aria-label="Close">${ICON.x}</button></div>
     <div class="nv-body">${soapRead(v, n, true)}</div>
-    <div class="dock nv-dock"><span class="dock-msg ${signed ? "ok" : ""}">${signed ? `Signed · ${when(n.signed_at)} · ${esc(v.doctor_name)}` : "Draft · not signed"}</span><span class="grow"></span>${signed ? `<button class="dock-go" data-a="note-print" data-v="${n.id}">Print</button>` : ""}</div></div>`, true);
+    <div class="dock nv-dock"><span class="dock-msg ${signed ? "ok" : ""}">${signed ? `Signed · ${when(n.signed_at)} · ${esc(n.signed_by_name || v.doctor_name)}` : "Draft · not signed"}</span><span class="grow"></span>${signed ? `<button class="dock-go" data-a="note-print" data-v="${n.id}">Print</button>` : ""}</div></div>`, true);
 }
 function renderFollowUp() {
   const opts = [[3, "3 days"], [7, "1 week"], [14, "2 weeks"], [30, "1 month"]];
@@ -1246,7 +1258,7 @@ document.addEventListener("click", e => {
       case "cs-side": S.cside = v; renderConsult(); break;
       case "cs-left": S.cleft = v; refreshConsult(); break;
       case "cs-patient": go(`#/consult?doctor=${D.doctorId}&patient=${v}`); break;
-      case "cs-draft-go": await flushText(); await api(`/visits/${v}/note/draft`, { body: {} }); S.ctab = "note"; toast("Draft ready."); refreshConsult(); break;
+      case "cs-draft-go": if (!(await flushText())) break; await api(`/visits/${v}/note/draft`, { body: {} }); S.ctab = "note"; toast("Draft ready."); refreshConsult(); break;
       case "note-sign-ro": await api(`/notes/${v}`, { method: "PUT", body: D.cur.note.content }); await api(`/notes/${v}/sign`, { body: {} }); toast("Signed. Visit complete."); refreshConsult(); break;
       case "cs-next-mic": { const r = await api(`/consultation/next?doctor_id=${v}`, { body: {} }); S.ctab = "dictate"; await new Promise(res => { const once = () => { window.removeEventListener("hashchange", once); setTimeout(res, 300); }; window.addEventListener("hashchange", once); go(`#/consult/${r.id}?doctor=${v}`); }); startMic(r.id); break; }
       case "cs-collapse": S.rightCollapsed = !S.rightCollapsed; renderConsult(); break;
@@ -1265,7 +1277,7 @@ document.addEventListener("click", e => {
       case "cs-open": go(`#/consult/${v}?doctor=${D.doctorId}`); break;
       case "cs-start": await api(`/visits/${v}/start`, { body: {} }); refreshConsult(); break;
       case "cs-brief": await api(`/visits/${v}/brief`, { body: {} }); toast("Brief updated"); refreshConsult(); break;
-      case "cs-draft": await flushText(); if (S.recState) await stopMic(); S.ctab = "note"; S.drafting = Number(v); S.noteEdit = false; renderConsult();
+      case "cs-draft": if (!(await flushText())) break; if (S.recState) await stopMic(); S.ctab = "note"; S.drafting = Number(v); S.noteEdit = false; renderConsult();
         try { await Promise.all([api(`/visits/${v}/note/draft`, { body: {} }), new Promise(r => setTimeout(r, 1400))]); } finally { S.drafting = null; S.dictDone = null; } refreshConsult(); break;
       case "mic": if (S.recState) await stopMic(); else { S.ctab = "dictate"; startMic(Number(v)); } break;
       case "spk": S.speaker = v; document.querySelectorAll('[data-a="spk"]').forEach(b => b.setAttribute("aria-pressed", b.dataset.v === v)); break;

@@ -82,6 +82,7 @@ def _row_factory(cursor):
 class PgCursor:
     def __init__(self, cur, lastrowid=None):
         self.cur, self.lastrowid = cur, lastrowid
+        self.rowcount = cur.rowcount
 
     def fetchone(self):
         return self.cur.fetchone() if self.cur.description else None

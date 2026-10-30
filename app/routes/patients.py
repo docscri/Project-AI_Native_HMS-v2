@@ -152,7 +152,7 @@ def merge(patient_id: int, body: Merge, me=Depends(require_screen("patients")), 
         (keep["id"], other["id"])).fetchone()
     if clash:
         raise HTTPException(409, "Both have a visit that day. Cancel one.")
-    for table in ("visits", "notes", "documents"):
+    for table in ("visits", "notes", "documents", "waitlist"):
         db.execute(f"update {table} set patient_id = ? where patient_id = ?", (keep["id"], other["id"]))
     fill = {k: other[k] for k in ("dob", "sex", "phone", "address") if not keep[k] and other[k]}
     if fill:

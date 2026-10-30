@@ -33,7 +33,8 @@ def load_docs(db, patient_id: int) -> list[dict]:
 
 
 def load_note(db, visit_id: int) -> dict | None:
-    n = row(db.execute("select * from notes where visit_id = ?", (visit_id,)).fetchone())
+    n = row(db.execute("""select n.*, s.name as signed_by_name from notes n left join members s on s.id = n.signed_by
+                           where n.visit_id = ?""", (visit_id,)).fetchone())
     if n:
         n["content"] = json.loads(n["content"])
         n["citations"] = json.loads(n["citations"])
@@ -236,8 +237,9 @@ def draft(visit_id: int, me=Depends(doctor_screen), db=Depends(get_db)):
     d = ai.draft_note(patient, items)
     content = json.dumps({"soap": d["soap"], "rx": d["rx"]})
     if existing:
-        db.execute("update notes set content = ?, citations = ?, updated_at = ? where id = ?",
-                   (content, json.dumps(d["citations"]), now(), existing["id"]))
+        if db.execute("update notes set content = ?, citations = ?, updated_at = ? where id = ? and status = 'draft'",
+                      (content, json.dumps(d["citations"]), now(), existing["id"])).rowcount != 1:
+            raise HTTPException(409, "Note is signed.")
     else:
         db.execute("insert into notes (clinic_id, patient_id, visit_id, doctor_id, content, citations) values (?, ?, ?, ?, ?, ?)",
                    (me["clinic_id"], v["patient_id"], visit_id, v["doctor_id"], content, json.dumps(d["citations"])))
@@ -287,8 +289,9 @@ def edit_note(note_id: int, body: NoteEdit, me=Depends(doctor_screen), db=Depend
         raise HTTPException(404, "Note not found.")
     if n["status"] == "signed":
         raise HTTPException(409, "Note is signed.")
-    db.execute("update notes set content = ?, updated_at = ? where id = ?",
-               (json.dumps({"soap": body.soap, "rx": body.rx}), now(), note_id))
+    if db.execute("update notes set content = ?, updated_at = ? where id = ? and status = 'draft'",
+                  (json.dumps({"soap": body.soap, "rx": body.rx}), now(), note_id)).rowcount != 1:
+        raise HTTPException(409, "Note is signed.")
     return load_note(db, n["visit_id"])
 
 
@@ -303,7 +306,10 @@ def sign(note_id: int, me=Depends(doctor_screen), db=Depends(get_db)):
     if me["kind"] != "doctor":
         raise HTTPException(403, "Only a doctor can sign.")
     ts = now()
-    db.execute("update notes set status = 'signed', signed_at = ? where id = ?", (ts, note_id))
+    # The status check is part of the write, so a save or a second signature racing this one can't slip through.
+    if db.execute("update notes set status = 'signed', signed_at = ?, signed_by = ? where id = ? and status = 'draft'",
+                  (ts, me["id"], note_id)).rowcount != 1:
+        raise HTTPException(409, "Already signed.")
     v = get_visit(db, me, n["visit_id"])
     if v["status"] == "with_doctor":
         move(db, me, v, "done", completed_at=ts)
@@ -326,6 +332,7 @@ def print_note(note_id: int, token: str, auto: int = 0, db=Depends(get_db)):
     v = row(db.execute("select * from visits where id = ?", (n["visit_id"],)).fetchone())
     p = row(db.execute("select * from patients where id = ?", (n["patient_id"],)).fetchone())
     d = row(db.execute("select name, speciality from members where id = ?", (n["doctor_id"],)).fetchone())
+    signer = row(db.execute("select name from members where id = ?", (n["signed_by"],)).fetchone()) if n["signed_by"] else None
     content, e = json.loads(n["content"]), html.escape
     labels = {"S": "Subjective", "O": "Objective", "A": "Assessment", "P": "Plan"}
     soap = "".join(f'<div class="sec"><b class="tile">{k}</b><div><small>{labels[k]}</small><p>{e(t)}</p></div></div>'
@@ -336,7 +343,7 @@ def print_note(note_id: int, token: str, auto: int = 0, db=Depends(get_db)):
         for r in rx) + "</table>") if rx else ""
     sex = {"M": "Male", "F": "Female", "O": "Other"}.get(p["sex"] or "", "")
     who = " · ".join(x for x in [f"{age(p['dob'])} yrs" if p["dob"] else "", sex, p["uhid"]] if x)
-    signed = f"Signed by {e(d['name'])} · {printpage.stamp(n['signed_at'])}" if n["signed_at"] else "Draft · not signed"
+    signed = f"Signed by {e((signer or d)['name'])} · {printpage.stamp(n['signed_at'])}" if n["signed_at"] else "Draft · not signed"
     body = f"""<header><div><h1>{e(c['name'])}</h1><small>{e(' · '.join(x for x in [c['address'], c['phone']] if x))}</small></div>
 <div class="r"><b>{e(p['name'])}</b><small>{e(who)}</small><small><span class="lime">{printpage.day(v['date'])}</span> · {e(d['name'])}{' · ' + e(d['speciality']) if d['speciality'] else ''}</small></div></header>
 <div class="secs">{soap or '<p>—</p>'}</div>{rx_html}

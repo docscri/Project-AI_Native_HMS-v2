@@ -47,11 +47,19 @@ def doctor_letters(db, clinic_id: int) -> dict[int, str]:
     return {d: chr(65 + i % 26) for i, d in enumerate(ids)}
 
 
+# Only these visit columns leave the server from Operations. Clinical text (dictation, transcript, brief) never does.
+VISIT_FIELDS = ", ".join("v." + c for c in (
+    "id", "clinic_id", "patient_id", "doctor_id", "date", "session_start", "token", "status", "is_walk_in", "fee",
+    "payment_method", "paid_at", "arrived_at", "started_at", "completed_at", "cancel_reason", "created_at", "discount",
+    "discount_reason", "amount_paid", "receipt_no", "refund_amount", "refund_reason", "refunded_at", "queue_order",
+    "late", "follow_up_of"))
+
+
 def visit_rows(db, me, where: str, args: tuple) -> list[dict]:
     clinic = clinic_of(db, me)
     letters = doctor_letters(db, me["clinic_id"])
     vs = rows(db.execute(
-        f"""select v.*, p.name as patient_name, p.uhid, p.phone, p.dob, p.sex, m.name as doctor_name,
+        f"""select {VISIT_FIELDS}, p.name as patient_name, p.uhid, p.phone, p.dob, p.sex, m.name as doctor_name,
               (select count(*) from documents d where d.visit_id = v.id) as doc_count
             from visits v join patients p on p.id = v.patient_id join members m on m.id = v.doctor_id
             where v.clinic_id = ? and {where}
@@ -69,8 +77,6 @@ def visit_rows(db, me, where: str, args: tuple) -> list[dict]:
         v["session_label"] = sess["label"] if sess and len(scheds[key]["sessions"]) > 1 else None
         v["session_end"] = sess["end"] if sess else None
         v["late"] = bool(v["late"])
-        v.pop("transcript", None)
-        v.pop("brief", None)
     return vs
 
 
@@ -206,6 +212,18 @@ def charge(db, me, fee: int, body: Payment) -> dict:
             "paid_at": ts, "arrived_at": ts}
 
 
+def ledger(db, me, visit_id: int, kind: str, amount: int, method=None, receipt=None, reason=None, at=None) -> None:
+    """One row per payment or refund, never overwritten."""
+    db.execute("insert into payments (clinic_id, visit_id, kind, amount, method, receipt_no, reason, at, by_member) values (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+               (me["clinic_id"], visit_id, kind, amount, method, receipt, reason, at or now(), me["id"]))
+
+
+def balance(db, visit_id: int) -> int:
+    """Money still held for a visit: everything paid minus everything refunded."""
+    return db.execute("select coalesce(sum(case when kind = 'payment' then amount else -amount end), 0) from payments where visit_id = ?",
+                      (visit_id,)).fetchone()[0]
+
+
 def visit_out(db, me, visit_id: int) -> dict:
     return visit_rows(db, me, "v.id = ?", (visit_id,))[0]
 
@@ -255,6 +273,7 @@ def walk_in(body: WalkIn, me=Depends(front_desk), db=Depends(get_db)):
         (me["clinic_id"], body.patient_id, body.doctor_id, today, session, token, avail["fee"], pay["payment_method"],
          pay["discount"], pay["discount_reason"], pay["amount_paid"], pay["receipt_no"], pay["paid_at"], pay["arrived_at"],
          token)).lastrowid
+    ledger(db, me, vid, "payment", pay["amount_paid"], pay["payment_method"], pay["receipt_no"], at=pay["paid_at"])
     log_event(db, me["clinic_id"], me["id"], "visit", vid, "walk_in", {"token": token, "paid": pay["amount_paid"]})
     return visit_out(db, me, vid)
 
@@ -273,8 +292,9 @@ def arrive(visit_id: int, body: Payment, me=Depends(front_desk), db=Depends(get_
     token = v["token"]
     if clinic["token_timing"] == "arrival" or token is None:
         token = next_arrival_token(db, v["doctor_id"], v["date"], v["session_start"])
-    move(db, me, v, "waiting", token=token, late=0, queue_order=token,
-         **charge(db, me, v["fee"], body))
+    pay = charge(db, me, v["fee"], body)
+    move(db, me, v, "waiting", token=token, late=0, queue_order=token, **pay)
+    ledger(db, me, visit_id, "payment", pay["amount_paid"], pay["payment_method"], pay["receipt_no"], at=pay["paid_at"])
     return visit_out(db, me, visit_id)
 
 
@@ -286,18 +306,20 @@ def undo_arrival(visit_id: int, body: Cancel, me=Depends(front_desk), db=Depends
         raise HTTPException(409, "This arrival can't be undone.")
     clinic = clinic_of(db, me)
     token = None if clinic["token_timing"] == "arrival" else v["token"]
-    paid = v["amount_paid"] or 0
+    held, reason = balance(db, visit_id), body.reason.strip() or "Arrival undone"
     move(db, me, v, "booked", token=token, queue_order=None, arrived_at=None, paid_at=None, payment_method=None,
          amount_paid=None, discount=0, discount_reason=None, receipt_no=None,
-         refund_amount=(v["refund_amount"] or 0) + paid, refund_reason=body.reason.strip() or "Arrival undone",
-         refunded_at=now() if paid else v["refunded_at"])
+         refund_amount=(v["refund_amount"] or 0) + held, refund_reason=reason,
+         refunded_at=now() if held else v["refunded_at"])
+    if held:
+        ledger(db, me, visit_id, "refund", held, reason=reason)
     return visit_out(db, me, visit_id)
 
 
 @router.post("/visits/{visit_id}/refund")
 def refund(visit_id: int, body: Refund, me=Depends(front_desk), db=Depends(get_db)):
     v = get_visit(db, me, visit_id)
-    left = (v["amount_paid"] or 0) - (v["refund_amount"] or 0)
+    left = balance(db, visit_id)
     amount = body.amount or left
     if not v["paid_at"] or left <= 0:
         raise HTTPException(409, "Nothing left to refund on this visit.")
@@ -307,6 +329,7 @@ def refund(visit_id: int, body: Refund, me=Depends(front_desk), db=Depends(get_d
         raise HTTPException(422, "Give a reason for the refund.")
     db.execute("update visits set refund_amount = ?, refund_reason = ?, refunded_at = ? where id = ?",
                ((v["refund_amount"] or 0) + amount, body.reason.strip(), now(), visit_id))
+    ledger(db, me, visit_id, "refund", amount, reason=body.reason.strip())
     log_event(db, me["clinic_id"], me["id"], "visit", visit_id, "refunded", {"amount": amount, "reason": body.reason.strip()})
     return visit_out(db, me, visit_id)
 
@@ -408,7 +431,7 @@ def receipt(visit_id: int, token: str, auto: int = 0, db=Depends(get_db)):
         lines.append((f"{'Waived' if v['discount'] == v['fee'] else 'Discount'}{' · ' + e(v['discount_reason']) if v['discount_reason'] else ''}", "−" + money(v["discount"])))
     if v["refund_amount"]:
         lines.append((f"Refunded{' · ' + e(v['refund_reason']) if v['refund_reason'] else ''}", "−" + money(v["refund_amount"])))
-    paid = (v["amount_paid"] or 0) - (v["refund_amount"] or 0)
+    paid = balance(db, visit_id)
     method = {"cash": "Cash", "upi": "UPI", "card": "Card"}.get(v["payment_method"] or "", "Waived")
     body = f"""<header><div><h1>{e(c['name'])}</h1><small>{e(' · '.join(x for x in [c['address'], c['phone']] if x))}</small></div>
 <div class="r"><b class="lime">Receipt #{v['receipt_no']}</b><small>{printpage.stamp(v['paid_at'])}</small></div></header>

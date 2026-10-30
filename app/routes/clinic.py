@@ -311,8 +311,11 @@ class NewMember(BaseModel):
 
 @router.get("/members")
 def list_members(me=Depends(current_member), db=Depends(get_db)):
-    ms = rows(db.execute("select * from members where clinic_id = ? order by is_owner desc, kind, name", (me["clinic_id"],)))
-    return [public_member(m) for m in ms]
+    ms = [public_member(m) for m in rows(db.execute("select * from members where clinic_id = ? order by is_owner desc, kind, name", (me["clinic_id"],)))]
+    if me["is_admin"]:
+        return ms
+    basic = ("id", "name", "kind", "speciality", "designation", "status", "is_owner", "is_admin")
+    return [{k: m.get(k) for k in basic} for m in ms]
 
 
 @router.post("/members")
@@ -333,7 +336,7 @@ def add_member(body: NewMember, me=Depends(require_admin), db=Depends(get_db)):
     ).lastrowid
     log_event(db, me["clinic_id"], me["id"], "member", mid, "invited", {"email": email})
     send_invite(db, me, mid, code)
-    return public_member(row(db.execute("select * from members where id = ?", (mid,)).fetchone()))
+    return public_member(row(db.execute("select * from members where id = ?", (mid,)).fetchone())) | {"invite_code": code}
 
 
 def send_invite(db, me, member_id: int, code: str) -> bool:
@@ -423,8 +426,8 @@ class MemberUpdate(BaseModel):
     address: str | None = None
     id_number: str | None = None
     work_days: list[int] | None = None
-    work_start: str | None = None
-    work_end: str | None = None
+    work_start: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    work_end: str | None = Field(default=None, pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
 
 
 @router.patch("/members/{member_id}")

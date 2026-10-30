@@ -2,6 +2,7 @@
 
 A day has one or more sessions (e.g. 09:00-13:00 and 17:00-20:00). Each session has its own capacity and
 token numbers, and every visit records its session by start time (visits.session_start)."""
+import re
 import json
 from datetime import date as Date, datetime
 
@@ -48,6 +49,8 @@ def validate_sessions(sessions: list[dict]) -> list[dict]:
         raise HTTPException(422, "Add at least one session.")
     if len(sessions) > MAX_SESSIONS:
         raise HTTPException(422, f"At most {MAX_SESSIONS} sessions a day.")
+    if any(not re.fullmatch(r"([01]\d|2[0-3]):[0-5]\d", str(s.get(k) or "")) for s in sessions for k in ("start", "end")):
+        raise HTTPException(422, "Use times like 09:30.")
     out = sorted(({"start": s["start"], "end": s["end"]} for s in sessions), key=lambda s: s["start"])
     for i, s in enumerate(out):
         if not (s["start"] and s["end"]) or s["start"] >= s["end"]:

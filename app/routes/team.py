@@ -288,19 +288,24 @@ def decide(leave_id: int, action: str, me=Depends(current_member), db=Depends(ge
 
 # ---------- collections ----------
 
-def money_rows(db, me, where: str, args: tuple) -> list[dict]:
+def money_rows(db, me, kind: str, start: str, end: str, doctor_id: int | None) -> list[dict]:
+    """Payments or refunds made in a date range, from the payment history (one row each)."""
+    doc = " and v.doctor_id = ?" if doctor_id else ""
     return rows(db.execute(
-        f"""select v.id, v.date, v.paid_at, v.payment_method, v.amount_paid, v.discount, v.discount_reason, v.receipt_no,
-              v.refund_amount, v.refund_reason, v.refunded_at, v.fee, p.name as patient_name, p.uhid, m.name as doctor_name, v.doctor_id
-            from visits v join patients p on p.id = v.patient_id join members m on m.id = v.doctor_id
-            where v.clinic_id = ? and {where} order by v.paid_at, v.id""", (me["clinic_id"], *args)))
+        f"""select pay.id as pay_id, v.id, v.date, pay.at, pay.at as paid_at, pay.at as refunded_at, pay.method as payment_method,
+              pay.amount, pay.amount as amount_paid, pay.amount as refund_amount, pay.receipt_no, pay.reason as refund_reason,
+              case when pay.receipt_no = v.receipt_no then v.discount else 0 end as discount, v.fee, v.doctor_id,
+              p.name as patient_name, p.uhid, m.name as doctor_name
+            from payments pay join visits v on v.id = pay.visit_id join patients p on p.id = v.patient_id join members m on m.id = v.doctor_id
+            where pay.clinic_id = ? and pay.kind = ? and substr(pay.at, 1, 10) between ? and ?{doc} order by pay.at, pay.id""",
+        (me["clinic_id"], kind, start, end, *((doctor_id,) if doctor_id else ()))))
 
 
 def totals(paid: list[dict], refunds: list[dict]) -> dict:
-    by = {k: sum(v["amount_paid"] or 0 for v in paid if v["payment_method"] == k) for k in ("cash", "upi", "card")}
-    refunded = sum(v["refund_amount"] or 0 for v in refunds)
+    by = {k: sum(v["amount"] for v in paid if v["payment_method"] == k) for k in ("cash", "upi", "card")}
+    refunded = sum(v["amount"] for v in refunds)
     return {"by_method": by, "collected": sum(by.values()), "refunded": refunded, "net": sum(by.values()) - refunded,
-            "discounts": sum(v["discount"] or 0 for v in paid), "waived": sum(1 for v in paid if not v["amount_paid"]),
+            "discounts": sum(v["discount"] or 0 for v in paid), "waived": sum(1 for v in paid if not v["amount"]),
             "visits": len(paid)}
 
 
@@ -309,13 +314,13 @@ def collections(start: str, end: str | None = None, doctor_id: int | None = None
     end = end or start
     doc = " and v.doctor_id = ?" if doctor_id else ""
     extra = (doctor_id,) if doctor_id else ()
-    paid = money_rows(db, me, "substr(v.paid_at, 1, 10) between ? and ?" + doc, (start, end, *extra))
-    refunds = money_rows(db, me, "v.refund_amount > 0 and substr(v.refunded_at, 1, 10) between ? and ?" + doc, (start, end, *extra))
+    paid = money_rows(db, me, "payment", start, end, doctor_id)
+    refunds = money_rows(db, me, "refund", start, end, doctor_id)
     days = []
     d = Date.fromisoformat(start)
     while d <= Date.fromisoformat(end) and len(days) < 400:
         k = d.isoformat()
-        t = totals([v for v in paid if v["paid_at"][:10] == k], [v for v in refunds if v["refunded_at"][:10] == k])
+        t = totals([v for v in paid if v["at"][:10] == k], [v for v in refunds if v["at"][:10] == k])
         if t["visits"] or t["refunded"]:
             days.append({"date": k, **t})
         d += timedelta(days=1)
@@ -348,7 +353,7 @@ class Close(BaseModel):
 @router.get("/day-close")
 def day_close(date: str, me=Depends(require_admin), db=Depends(get_db)):
     t = collections(date, date, None, me, db)
-    cash = t["by_method"]["cash"] - sum(v["refund_amount"] for v in t["refunds"] if v["payment_method"] == "cash")
+    cash = t["by_method"]["cash"] - t["refunded"]   # refunds are handed back in cash
     closed = row(db.execute("select c.*, m.name as closed_by_name from day_close c left join members m on m.id = c.closed_by where c.clinic_id = ? and c.date = ?",
                             (me["clinic_id"], date)).fetchone())
     past = rows(db.execute("select c.*, m.name as closed_by_name from day_close c left join members m on m.id = c.closed_by where c.clinic_id = ? order by c.date desc limit 14",

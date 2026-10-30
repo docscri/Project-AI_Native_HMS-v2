@@ -67,7 +67,7 @@ def new_code() -> str:
 
 def public_member(m: dict) -> dict:
     m = dict(m)
-    for key in ("password_hash", "token", "failed_logins", "locked_until"):
+    for key in ("password_hash", "token", "failed_logins", "locked_until", "invite_code"):
         m.pop(key, None)
     m["is_owner"] = bool(m["is_owner"])
     m["is_admin"] = bool(m["is_admin"] or m["is_owner"])
