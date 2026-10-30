@@ -1080,9 +1080,9 @@ async function teamView(sub) {
   return "";
 }
 function moneyTiles(t) {
-  const m = t.by_method;
-  return `<div class="tiles-row"><div class="tk big"><small>Net</small><b>${rupees(t.net)}</b></div><div class="tk"><small>Cash</small><b>${rupees(m.cash)}</b></div><div class="tk"><small>UPI</small><b>${rupees(m.upi)}</b></div><div class="tk"><small>Card</small><b>${rupees(m.card)}</b></div></div>
-    <div class="tiles-row"><div class="tk"><small>Visits</small><b>${t.visits}</b></div><div class="tk"><small>Refunds</small><b>${rupees(t.refunded)}</b></div><div class="tk"><small>Discounts</small><b>${rupees(t.discounts)}</b></div><div class="tk"><small>Waived</small><b>${t.waived}</b></div></div>`;
+  const m = t.by_method, st = (k, v) => `<div class="st"><small>${k}</small><b>${v}</b></div>`;
+  return `<div class="stat-strip"><div class="st net"><small>Net</small><b>${rupees(t.net)}</b></div>${st("Cash", rupees(m.cash))}${st("UPI", rupees(m.upi))}${st("Card", rupees(m.card))}
+    <span class="st-gap"></span>${st("Visits", t.visits)}${st("Refunds", rupees(t.refunded))}${st("Discounts", rupees(t.discounts))}${st("Waived", t.waived)}</div>`;
 }
 async function moneyView() {
   S.mon = S.mon || { from: TODAY, to: TODAY };
