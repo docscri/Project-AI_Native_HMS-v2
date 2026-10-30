@@ -601,6 +601,7 @@ function copyInvite(code, msg) {
 
 /* consultation */
 const CTABS = [["brief", "Brief"], ["dictate", "Transcript"], ["note", "Note"]];
+const BTABS = [["summary", "Summary"], ["events", "Events"], ["charts", "Charts"]];
 async function viewConsult(visitId, doctorParam, patientParam) {
   const g = S.gen;
   const isDoctor = S.me.kind === "doctor";
@@ -714,16 +715,45 @@ function center() {
     <div class="cx-head"><div><h1>${esc(v.patient_name)}${v.age != null ? ", " + v.age : ""}</h1>
 </div>
       <span class="cx-top-right">${["with_doctor", "done"].includes(v.status) ? `<button class="cx-pill-btn" data-a="fu-open" data-v="${v.id}">Follow-up</button>` : ""}<span class="cx-status st-${v.status}"><i></i>${stateLabel}</span>${sideBtn()}</span></div>
-    <div class="cx-tabs">${CTABS.map(([k, l]) => `<button data-a="cs-tab" data-v="${k}" aria-pressed="${S.ctab === k}">${l}</button>`).join("")}</div>
+    <div class="cx-tabrow"><div class="cx-tabs">${CTABS.map(([k, l]) => `<button data-a="cs-tab" data-v="${k}" aria-pressed="${S.ctab === k}">${l}</button>`).join("")}</div>
+      ${S.ctab === "brief" ? `<div class="cx-tabs">${BTABS.map(([k, l]) => `<button data-a="cs-btab" data-v="${k}" aria-pressed="${(S.btab || "summary") === k}">${l}</button>`).join("")}</div>` : ""}</div>
     <div class="cx-pane">${({ brief: paneBrief, dictate: paneDictate, note: paneNote })[S.ctab](v)}</div>
   </div>`;
 }
+// Brief: summary (new reports first, then history), past visits as events, and values over time. All cited.
 function paneBrief(v) {
-  const items = v.brief?.items || [];
-  const lead = items[0], rest = items.slice(1);
-  if (!lead) return ["waiting", "with_doctor"].includes(v.status) ? `<p class="muted cx-lead">Preparing brief…</p>` : "";
-  return `<p class="cx-lead">${esc(lead.text)}${citeBtns(lead.cites)}</p>
-    ${rest.length ? `<div class="cx-events">${rest.map(i => `<div class="${i.flag ? "flag" : ""}"><span>${i.flag ? "⚠" : "•"}</span><span>${esc(i.text)}${citeBtns(i.cites)}</span></div>`).join("")}</div>` : ""}`;
+  const b = v.brief, tab = S.btab || "summary";
+  if (!b?.summary) return `<p class="muted cx-lead">${["waiting", "with_doctor"].includes(v.status) ? "Preparing brief…" : "—"}</p>`;
+  if (tab === "events") return b.events.length ? `<div class="timeline">${b.events.map(e => `<div class="tl"><div class="tl-head"><b>${longDate(e.date)}</b><span>${esc(e.doctor)}</span>${pill("done")}</div>
+      <div class="items"><button class="btn small" data-a="note-view" data-v="${e.visit_id}">Note & prescription</button>${e.documents.map(d => `<button class="btn small" data-a="open-doc" data-v="${d.id}">📄 ${esc(d.filename)}</button>`).join("")}</div>
+      <div class="muted" style="font-size:13.5px;margin-top:6px">${esc(e.text)}</div></div>`).join("")}</div>` : `<p class="muted cx-lead">First visit.</p>`;
+  if (tab === "charts") return b.charts.length ? `<div class="bchart-grid">${b.charts.map(chartCard).join("")}</div>` : `<p class="muted cx-lead">No values yet.</p>`;
+  const paras = b.summary.filter(p => p.sentences.length);
+  return paras.length ? paras.map(p => `<p class="cx-lead">${p.sentences.map(x => esc(x.text) + citeBtns(x.cites)).join(" ")}</p>`).join("") : `<p class="muted cx-lead">First visit.</p>`;
+}
+const num = x => String(+x);
+const monYr = d => new Date(d).toLocaleDateString("en-IN", { month: "short", year: "2-digit" });
+// One test over time. Two lines only for BP (systolic, diastolic): blue and deep coral, validated against the card.
+function chartCard(c) {
+  const W = 320, H = 130, L = 34, R = 12, T = 12, B = 22, pts = c.series.flatMap(x => x.points);
+  const ms = d => new Date(d).getTime(), t0 = Math.min(...pts.map(p => ms(p.date))), t1 = Math.max(...pts.map(p => ms(p.date)));
+  let lo = Math.min(...pts.map(p => p.value)), hi = Math.max(...pts.map(p => p.value));
+  const pad = (hi - lo || Math.abs(hi) || 1) * 0.2; lo -= pad; hi += pad;
+  const x = d => t1 === t0 ? (L + W - R) / 2 : L + (ms(d) - t0) / (t1 - t0) * (W - L - R);
+  const y = val => T + (hi - val) / (hi - lo) * (H - T - B);
+  const colors = c.series.length > 1 ? ["#2a78d6", "#D9542F"] : ["var(--ink)"];
+  const lines = c.series.map((ser, i) => `${ser.points.length > 1 ? `<path d="${ser.points.map((p, j) => `${j ? "L" : "M"}${x(p.date).toFixed(1)},${y(p.value).toFixed(1)}`).join("")}" fill="none" stroke="${colors[i]}" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>` : ""}
+    ${ser.points.map(p => `<g class="bpt" data-a="cite" data-v="${p.cite}" tabindex="0" role="button" aria-label="${esc(ser.name)} ${num(p.value)} ${esc(c.unit)}, ${longDate(p.date)}"><circle cx="${x(p.date)}" cy="${y(p.value)}" r="12" fill="transparent"/><circle cx="${x(p.date)}" cy="${y(p.value)}" r="4" fill="${colors[i]}" stroke="var(--surface)" stroke-width="2"/>
+      <text class="bpt-tip" x="${Math.min(Math.max(x(p.date), L + 24), W - R - 24)}" y="${Math.max(y(p.value) - 10, 10)}" text-anchor="middle">${num(p.value)} · ${monYr(p.date)}</text></g>`).join("")}`).join("");
+  const latest = c.series.map(ser => num(ser.points.at(-1).value)).join("/");
+  return `<div class="bchart"><div class="bchart-head"><b>${esc(c.test)}</b><span>${latest}${c.unit ? " " + esc(c.unit) : ""}</span></div>
+    ${c.series.length > 1 ? `<div class="bchart-legend">${c.series.map((ser, i) => `<span><i style="background:${colors[i]}"></i>${esc(ser.name)}</span>`).join("")}</div>` : ""}
+    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(c.test)} over time">
+      <line x1="${L}" y1="${H - B}" x2="${W - R}" y2="${H - B}" class="bchart-axis"/>
+      <text x="${L - 6}" y="${y(hi - pad) + 4}" text-anchor="end" class="bchart-tick">${num(+(hi - pad).toFixed(1))}</text>
+      <text x="${L - 6}" y="${y(lo + pad) + 4}" text-anchor="end" class="bchart-tick">${num(+(lo + pad).toFixed(1))}</text>
+      <text x="${L}" y="${H - 6}" class="bchart-tick">${monYr(new Date(t0))}</text>${t1 > t0 ? `<text x="${W - R}" y="${H - 6}" text-anchor="end" class="bchart-tick">${monYr(new Date(t1))}</text>` : ""}
+      ${lines}</svg></div>`;
 }
 function paneDictate(v) {
   const n = v.note, can = v.status === "with_doctor" && n?.status !== "signed";
@@ -788,7 +818,7 @@ function noteDock(v) {
 }
 function rightCol() {
   const D = S.data, p = D.profile;
-  const tabs = `<div class="cx-right-top"><button class="cx-side-btn close" data-a="cs-collapse" aria-label="Hide side panel" title="Hide side panel"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h12M12 6l6 6-6 6"/></svg></button><div class="cx-seg"><button data-a="cs-side" data-v="profile" aria-pressed="${S.cside !== "citations"}">Profile</button><button data-a="cs-side" data-v="citations" aria-pressed="${S.cside === "citations"}">Citations</button></div></div>`;
+  const tabs = `<div class="cx-right-top"><button class="cx-side-btn close" data-a="cs-collapse" aria-label="Hide side panel" title="Hide side panel"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h12M12 6l6 6-6 6"/></svg></button><div class="cx-seg"><button data-a="cs-side" data-v="profile" aria-pressed="${S.cside !== "citations"}">Profile</button><button data-a="cs-side" data-v="citations" aria-pressed="${S.cside === "citations"}">Sources</button></div></div>`;
   if (S.cside === "citations") return `${tabs}${citations(D.cur)}`;
   if (!p) return `${tabs}<div class="cx-empty">—</div>`;
   return `${tabs}<div class="cx-rows">
@@ -797,22 +827,32 @@ function rightCol() {
 }
 function sourceOf(v, id) {
   if (id.startsWith("T")) { const t = v.note?.sources?.[id] ?? sentences(freeText(v))[Number(id.slice(1)) - 1]?.text; return t && { kind: "Transcript", text: t }; }
+  const bs = v.brief?.sources?.[id];
+  if (bs) return bs.kind === "note" ? { kind: `Note · ${longDate(bs.date)} · ${bs.section}`, text: bs.body } : { kind: `Report · ${longDate(bs.date)}`, text: bs.filename + (bs.summary ? " — " + bs.summary : "") };
   if (id.startsWith("D")) { const d = v.documents.find(x => "D" + x.id === id); return d && { kind: "Document", text: d.filename + (d.extracted?.findings?.length ? " — " + d.extracted.findings.slice(0, 3).map(f => `${f.name} ${f.value} ${f.unit || ""}`.trim()).join(", ") : "") }; }
   if (id.startsWith("N")) return { kind: "Earlier note", text: "Signed note from a previous visit" };
   return null;
 }
+// Sources panel: what the note cites (S/O/A/P) and what the brief's summary and charts cite (notes and reports).
 function citations(v) {
   if (!v) return `<div class="cx-empty">—</div>`;
-  const groups = [];
-  const cites = v.note?.citations || {};
+  const groups = [], cites = v.note?.citations || {}, b = v.brief;
   ["S", "O", "A", "P"].forEach(k => { if (cites[k]?.length) groups.push([k, cites[k]]); });
-  const briefIds = [...new Set((v.brief?.items || []).flatMap(i => i.cites || []))];
+  const briefIds = [...new Set([...(b?.summary || []).flatMap(p => p.sentences.flatMap(x => x.cites)), ...(b?.charts || []).flatMap(c => c.series.flatMap(x => x.points.map(p => p.cite)))])];
   if (briefIds.length) groups.push(["B", briefIds]);
-  if (!groups.length) return `<div class="cx-empty">No citations</div>`;
-  return `<div class="cite-list">${groups.map(([k, ids]) => `<div class="cite-item"><b>${k}</b><div class="cite-src">${ids.map(id => { const src = sourceOf(v, id); return src ? `<button data-a="cite" data-v="${id}"><small>${src.kind.toUpperCase()} · ${id}</small>${esc(src.text)}</button>` : ""; }).join("")}</div></div>`).join("")}</div>`;
+  if (!groups.length) return `<div class="cx-empty">No sources</div>`;
+  const card = id => {
+    const bs = b?.sources?.[id], on = S.focusSrc === id ? " hl" : "";
+    if (bs?.kind === "document") return `<div class="src-doc${on}" id="src-${id}"><small>REPORT · ${longDate(bs.date).toUpperCase()}</small><b>${esc(bs.filename)}</b>${bs.summary ? `<span>${esc(bs.summary)}</span>` : ""}
+      ${bs.findings.length ? `<span class="src-vals">${bs.findings.map(f => esc(`${f.name} ${f.value} ${f.unit || ""}`.trim())).join(" · ")}</span>` : ""}<button class="btn small" data-a="open-doc" data-v="${bs.doc_id}">Open file</button></div>`;
+    if (bs?.kind === "note") return `<button class="${on.trim()}" id="src-${id}" data-a="note-view" data-v="${bs.visit_id}"><small>NOTE · ${longDate(bs.date).toUpperCase()} · ${bs.section.toUpperCase()}</small>${esc(bs.body)}<em>${esc(bs.doctor)}</em></button>`;
+    const src = sourceOf(v, id); return src ? `<button data-a="cite" data-v="${id}"><small>${src.kind.toUpperCase()} · ${id}</small>${esc(src.text)}</button>` : "";
+  };
+  return `<div class="cite-list">${groups.map(([k, ids]) => `<div class="cite-item"><b>${k}</b><div class="cite-src">${ids.map(card).join("")}</div></div>`).join("")}</div>`;
 }
 const fmtClock = ms => { const t = Math.floor(ms / 1000); return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`; };
-function citeBtns(ids) { return (ids || []).map(c => `<button class="cite" data-a="cite" data-v="${c}">${c}</button>`).join(""); }
+const citeLabel = id => { const bs = S.data?.cur?.brief?.sources?.[id]; return !bs ? id : bs.kind === "note" ? `${new Date(bs.date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })} · ${bs.section[0]}` : "Report"; };
+function citeBtns(ids) { return (ids || []).map(c => `<button class="cite" data-a="cite" data-v="${c}">${esc(citeLabel(c))}</button>`).join(""); }
 function noteEditor(n, ro) {
   const soap = n.content.soap, rx = n.content.rx;
   return `<div class="choices">${["S", "O", "A", "P"].map(k => `<div class="soap"><b>${k}</b><div>${ro ? `<div class="ro">${esc(soap[k] || "—")}</div>` : `<textarea id="soap-${k}">${esc(soap[k] || "")}</textarea>`}<div>${citeBtns(n.citations?.[k])}</div></div></div>`).join("")}</div>
@@ -1369,6 +1409,7 @@ document.addEventListener("click", e => {
       case "pe-save": await api(`/patients/${M.id}`, { method: "PATCH", body: { name: $("#pe-name").value, phone: $("#pe-phone").value, dob: $("#pe-dob").value || null, sex: $("#pe-sex").value, address: $("#pe-addr").value } }); closeModal(); toast("Saved"); route(); break;
       case "cs-tab": await flushText(); if (D.cur?.note && $("#soap-S")) D.cur.note.content = readNote(); S.ctab = v; renderConsult(); break;
       case "cs-side": S.cside = v; renderConsult(); break;
+      case "cs-btab": S.btab = v; renderConsult(); break;
       case "cs-left": S.cleft = v; refreshConsult(); break;
       case "cs-patient": go(`#/consult?doctor=${D.doctorId}&patient=${v}`); break;
       case "cs-draft-go": if (!(await flushText(Number(v)))) break; await api(`/visits/${v}/note/draft`, { body: {} }); S.ctab = "note"; toast("Draft ready."); refreshConsult(); break;
@@ -1411,7 +1452,8 @@ document.addEventListener("click", e => {
       case "cite": if (v.startsWith("T")) { const src = sourceOf(D.cur, v); if (!src) break;
         if (S.ctab !== "dictate") { S.ctab = "dictate"; renderConsult(); }
         const ta = $("#free-text"), at = ta.value.indexOf(src.text); ta.focus(); if (at >= 0) ta.setSelectionRange(at, at + src.text.length); break; }
-      { const el = document.getElementById("ev-" + v); if (el) { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); el.classList.add("hl"); setTimeout(() => el.classList.remove("hl"), 1800); } else toast(v.startsWith("N") ? "From an earlier note." : "Source: " + v); break; }
+      S.cside = "citations"; S.rightCollapsed = false; S.focusSrc = v; renderConsult();
+      { const el = document.getElementById("src-" + v); el?.scrollIntoView({ behavior: "smooth", block: "nearest" }); setTimeout(() => { if (S.focusSrc === v) { S.focusSrc = null; document.getElementById("src-" + v)?.classList.remove("hl"); } }, 1800); }
     }
   });
 });

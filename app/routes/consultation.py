@@ -8,7 +8,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Up
 from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 
-from .. import ai, printpage, storage
+from .. import ai, brief, printpage, storage
 from ..auth import current_member, member_for_token, public_member, require_any, require_screen
 from ..db import connect, get_db, log_event, now, row, rows
 from ..rules import clinic_doctor, valid_day
@@ -104,7 +104,8 @@ def workspace(visit_id: int, me=Depends(require_any("consultation", "patients"))
     out["age"] = age(out["dob"])
     out["text"] = text_of(v)
     out["text_rev"] = v["dictation_rev"]
-    out["brief"] = json.loads(v["brief"]) if v["brief"] else None
+    saved = json.loads(v["brief"]) if v["brief"] else None
+    out["brief"] = saved if saved and saved.get("basis") == brief.current_basis(db, v) else None   # rebuilt when stale
     out["documents"] = load_docs(db, v["patient_id"])
     out["note"] = load_note(db, visit_id)
     out["ai_enabled"] = ai.enabled()
@@ -115,8 +116,7 @@ def workspace(visit_id: int, me=Depends(require_any("consultation", "patients"))
 @router.post("/visits/{visit_id}/brief")
 def make_brief(visit_id: int, me=Depends(doctor_screen), db=Depends(get_db)):
     v = get_visit(db, me, visit_id)
-    patient, items = evidence_for(db, v)
-    b = ai.brief(patient, items) | {"made_at": now()}
+    b = brief.build(db, v) | {"made_at": now()}
     db.execute("update visits set brief = ? where id = ?", (json.dumps(b), visit_id))
     return b
 
@@ -200,8 +200,8 @@ async def upload(visit_id: int, tasks: BackgroundTasks, file: UploadFile = File(
         raise HTTPException(422, "The file is empty.")
     path = storage.save(me["clinic_id"], data, mime)
     did = db.execute(
-        "insert into documents (clinic_id, patient_id, visit_id, filename, path, mime) values (?, ?, ?, ?, ?, ?)",
-        (me["clinic_id"], v["patient_id"], visit_id, file.filename or "document", str(path), mime)).lastrowid
+        "insert into documents (clinic_id, patient_id, visit_id, filename, path, mime, created_at) values (?, ?, ?, ?, ?, ?, ?)",
+        (me["clinic_id"], v["patient_id"], visit_id, file.filename or "document", str(path), mime, now())).lastrowid
     log_event(db, me["clinic_id"], me["id"], "document", did, "uploaded", {"visit": visit_id})
     db.commit()
     tasks.add_task(run_extraction, did)

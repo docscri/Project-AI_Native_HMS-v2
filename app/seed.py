@@ -106,12 +106,12 @@ def seed() -> bool:
     UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     path = UPLOAD_DIR / "seed-blood-report.txt"
     path.write_text("Sunrise Diagnostics\nHbA1c: 8.9 %\nFasting glucose: 168 mg/dL\nCreatinine: 1.0 mg/dL\n")
-    db.execute("""insert into documents (clinic_id, patient_id, visit_id, filename, path, mime, ai_status, extracted)
-                  values (?, ?, ?, 'Blood report.txt', ?, 'text/plain', 'ready', ?)""",
+    db.execute("""insert into documents (clinic_id, patient_id, visit_id, filename, path, mime, ai_status, extracted, created_at)
+                  values (?, ?, ?, 'Blood report.txt', ?, 'text/plain', 'ready', ?, ?)""",
                (cid, pid["Suresh Pillai"], today_suresh, str(path), json.dumps({
                    "summary": "Blood report from Sunrise Diagnostics.",
                    "findings": [{"name": "HbA1c", "value": "8.9", "unit": "%"}, {"name": "Fasting glucose", "value": "168", "unit": "mg/dL"},
-                                {"name": "Creatinine", "value": "1.0", "unit": "mg/dL"}]})))
+                                {"name": "Creatinine", "value": "1.0", "unit": "mg/dL"}]}), now()))
     history(db, cid, anjali, rahul, meera, tess, pid, receipt)
     db.execute("""insert into payments (clinic_id, visit_id, kind, amount, method, receipt_no, at, by_member)
                   select clinic_id, id, 'payment', coalesce(amount_paid, 0), payment_method, receipt_no, paid_at, ? from visits where clinic_id = ? and paid_at is not null""", (tess, cid))

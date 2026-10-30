@@ -53,7 +53,7 @@ def test_full_flow():
         up = c.post(f"/api/visits/{v['id']}/documents", headers=mh, files={"file": ("report.txt", b"Hb: 11.2 g/dL", "text/plain")})
         assert up.status_code == 200
         brief = c.post(f"/api/visits/{v['id']}/brief", headers=h).json()
-        assert brief["items"]
+        assert brief["summary"][0]["kind"] == "new" and brief["summary"][0]["sentences"][0]["cites"] == [f"D{up.json()['id']}"]
         note = c.post(f"/api/visits/{v['id']}/note/draft", headers=h).json()
         assert note["content"]["soap"]["A"] and note["content"]["rx"][0]["medicine"].startswith("Paracetamol")
         assert "T3" in note["citations"]["A"]

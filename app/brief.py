@@ -1,0 +1,147 @@
+"""Pre-visit brief: summary, visit events and charts. Every line cites a signed-note section or a document."""
+import json
+import re
+from datetime import date
+
+from . import ai
+from .db import row, rows
+
+SECTIONS = {"S": "Subjective", "O": "Objective", "A": "Assessment", "P": "Plan"}
+NUM = re.compile(r"\d+(?:\.\d+)?")
+ALIASES = {"hba1c": "HbA1c", "glycatedhb": "HbA1c", "glycatedhaemoglobin": "HbA1c", "glycatedhemoglobin": "HbA1c",
+           "fbs": "Fasting sugar", "fastingsugar": "Fasting sugar", "fastingbloodsugar": "Fasting sugar", "fastingglucose": "Fasting sugar",
+           "rbs": "Random sugar", "randomsugar": "Random sugar", "randombloodsugar": "Random sugar", "randomglucose": "Random sugar",
+           "bp": "BP", "bloodpressure": "BP", "temp": "Temperature", "temperature": "Temperature", "spo2": "SpO2",
+           "pulse": "Pulse", "hr": "Pulse", "heartrate": "Pulse", "weight": "Weight", "wt": "Weight",
+           "creatinine": "Creatinine", "serumcreatinine": "Creatinine"}
+
+
+def nice(d: str) -> str:
+    x = date.fromisoformat(d[:10])
+    return f"{x.day} {x.strftime('%b %Y')}"
+
+
+def inputs(db, v: dict) -> tuple[list[dict], list[dict]]:
+    """The patient's other signed notes (newest first) and readable documents."""
+    notes = rows(db.execute(
+        """select n.*, vv.date, vv.id as vid, m.name as doctor from notes n join visits vv on vv.id = n.visit_id
+           join members m on m.id = vv.doctor_id
+           where n.patient_id = ? and n.status = 'signed' and n.visit_id != ? order by vv.date desc, n.id desc""",
+        (v["patient_id"], v["id"])))
+    docs = rows(db.execute("select * from documents where patient_id = ? and ai_status = 'ready' order by id desc", (v["patient_id"],)))
+    for n in notes:
+        n["content"] = json.loads(n["content"])
+    for d in docs:
+        d["extracted"] = json.loads(d["extracted"]) if d["extracted"] else {}
+    return notes, docs
+
+
+def basis(notes: list[dict], docs: list[dict]) -> str:
+    """Changes when a note is signed or a report is read, so the saved brief is reused until then."""
+    return "n" + ",".join(str(n["id"]) for n in notes) + ";d" + ",".join(str(d["id"]) for d in docs) + (";ai" if ai.enabled() else "")
+
+
+def current_basis(db, v: dict) -> str:
+    return basis(*inputs(db, v))
+
+
+def values_of(db, n: dict) -> list[dict]:
+    """Numbers in a signed note, read once and saved."""
+    if n.get("vals") is None:
+        n["vals"] = json.dumps(ai.note_values(n["content"]["soap"]))
+        db.execute("update notes set vals = ? where id = ?", (n["vals"], n["id"]))
+    return json.loads(n["vals"])
+
+
+def checked(items, sources: dict) -> list[dict]:
+    """Keeps a sentence only if it cites known sources and every number in it appears in them."""
+    out = []
+    for it in items if isinstance(items, list) else []:
+        if not isinstance(it, dict):
+            continue
+        text = str(it.get("text") or "").strip()
+        cites = [c for c in it.get("cites") or [] if c in sources]
+        if not text or not cites:
+            continue
+        have = set(NUM.findall(" ".join(sources[c]["text"] for c in cites)))
+        if all(x in have for x in NUM.findall(text)):
+            out.append({"text": text, "cites": cites})
+    return out
+
+
+def charts(notes: list[dict], docs: list[dict], db) -> list[dict]:
+    points = {}   # (test, unit) -> {date: point}; a report beats a note on the same day
+    def add(test, unit, value, day, cite, from_doc):
+        name = ALIASES.get(re.sub(r"[^a-z0-9]", "", str(test).lower()), str(test).strip())
+        unit = str(unit or "").strip()
+        value = str(value).replace(" ", "")
+        if name == "BP" and "/" in value:
+            sys_, dia = value.split("/", 1)
+            add("BP systolic", unit or "mmHg", sys_, day, cite, from_doc)
+            add("BP diastolic", unit or "mmHg", dia, day, cite, from_doc)
+            return
+        if not re.fullmatch(r"\d+(?:\.\d+)?", value) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}", day or ""):
+            return
+        series = points.setdefault((name, unit), {})
+        if from_doc or day not in series or not series[day]["doc"]:
+            series[day] = {"date": day, "value": float(value), "cite": cite, "doc": from_doc}
+    for d in docs:
+        for f in d["extracted"].get("findings") or []:
+            add(f.get("name"), f.get("unit"), f.get("value"), (f.get("date") or d["created_at"])[:10], f"D{d['id']}", True)
+    for n in notes:
+        for f in values_of(db, n):
+            add(f["test"], f.get("unit"), f["value"], n["date"], f"N{n['id']}.{f['section']}", False)
+    out, bp = [], {}
+    for (name, unit), series in points.items():
+        pts = [{k: p[k] for k in ("date", "value", "cite")} for p in sorted(series.values(), key=lambda p: p["date"])]
+        if name.startswith("BP "):
+            bp[name] = pts
+        else:
+            out.append({"test": name, "unit": unit, "series": [{"name": name, "points": pts}]})
+    if bp:
+        out.append({"test": "BP", "unit": "mmHg", "series": [{"name": k.split()[1].title(), "points": bp[k]} for k in ("BP systolic", "BP diastolic") if k in bp]})
+    return sorted(out, key=lambda c: -sum(len(s["points"]) for s in c["series"]))
+
+
+def build(db, v: dict) -> dict:
+    notes, docs = inputs(db, v)
+    p = row(db.execute("select dob, sex from patients where id = ?", (v["patient_id"],)).fetchone())
+    sources = {}
+    for n in notes:
+        for k, label in SECTIONS.items():
+            body = (n["content"]["soap"].get(k) or "").strip()
+            if body:
+                sources[f"N{n['id']}.{k}"] = {"kind": "note", "visit_id": n["vid"], "date": n["date"], "doctor": n["doctor"], "section": label,
+                                              "body": body, "text": f"{n['date']} {nice(n['date'])} {body}"}
+    last_signed = max((n["signed_at"] or "" for n in notes), default="")
+    new_ids = []
+    for d in docs:
+        ex, made = d["extracted"], d["created_at"][:10]
+        vals = ", ".join(f'{f.get("name")} {f.get("value")} {f.get("unit") or ""}'.strip() for f in ex.get("findings") or [])
+        sources[f"D{d['id']}"] = {"kind": "document", "doc_id": d["id"], "filename": d["filename"], "date": made, "label": d["filename"].rsplit(".", 1)[0],
+                                  "summary": ex.get("summary") or "", "findings": ex.get("findings") or [],
+                                  "text": f"{made} {nice(made)} {d['filename']} {ex.get('summary') or ''} {vals}"}
+        if d["created_at"].replace(" ", "T") >= last_signed:   # older rows were stamped "YYYY-MM-DD HH:MM:SS"
+            new_ids.append(f"D{d['id']}")
+    visits = [{"note": f"N{n['id']}", "date_text": nice(n["date"])} for n in notes]
+    patient = {"age": None if not p or not p["dob"] else date.today().year - int(p["dob"][:4]), "sex": p["sex"] if p else None}
+    text = {}
+    if sources:
+        try:
+            text = ai.brief_text(patient, sources, new_ids, visits)
+        except Exception:   # AI unavailable: the plain version still reaches the doctor
+            text = ai.brief_text(patient, sources, new_ids, visits, use_ai=False)
+    new = [s for s in checked(text.get("new"), sources) if all(c in new_ids for c in s["cites"])]
+    lines = {e.get("note"): e for e in text.get("events") or [] if isinstance(e, dict)}
+    events = []
+    for n in notes:
+        nid = f"N{n['id']}"
+        got = checked([lines[nid]], sources) if nid in lines else []
+        if not got:   # the note's own words: why they came, what was found
+            parts = [(f"{nid}.{k}", (ai.sentences(n["content"]["soap"].get(k) or "") or [""])[0]) for k in ("S", "A")]
+            got = [{"text": " ".join(t for _, t in parts if t), "cites": [c for c, t in parts if t]}]
+        own_docs = [{"id": d["id"], "filename": d["filename"]} for d in docs if d["visit_id"] == n["vid"]]
+        events.append({"visit_id": n["vid"], "date": n["date"], "doctor": n["doctor"], "text": got[0]["text"],
+                       "cites": got[0]["cites"] + [f"D{d['id']}" for d in own_docs], "documents": own_docs})
+    return {"summary": [{"kind": "new", "sentences": new}] * bool(new) + [{"kind": "history", "sentences": checked(text.get("history"), sources)}],
+            "events": events, "charts": charts(notes, docs, db), "sources": sources, "basis": basis(notes, docs)}

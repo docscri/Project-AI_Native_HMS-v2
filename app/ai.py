@@ -69,31 +69,6 @@ def _keep_known(cites, known: set[str]) -> list[str]:
 
 
 
-def brief(patient: dict, items: list[dict]) -> dict:
-    """{"items": [{"text", "cites", "flag"}]}"""
-    known = {i["id"] for i in items if i["kind"] != "transcript"}
-    usable = [i for i in items if i["kind"] != "transcript"]
-    if not usable:
-        return {"items": [{"text": "First visit. No earlier notes or documents.", "cites": [], "flag": False}]}
-    if enabled():
-        out = _gemini([{"text": _prompt("brief.txt") + "\n\nPATIENT: " + json.dumps(patient) + "\n\nEVIDENCE:\n" + json.dumps(usable)}])
-        for it in out.get("items", []):
-            it["cites"] = _keep_known(it.get("cites"), known)
-        return out
-    notes = [i for i in usable if i["kind"] == "note"]
-    docs = [i for i in usable if i["kind"] == "document"]
-    who = f'{patient.get("age") or ""}-year-old {({"M": "man", "F": "woman"}).get(patient.get("sex"), "patient")}'.lstrip("-")
-    lead = [who[0].upper() + who[1:] + "."]
-    if notes:
-        lead.append(notes[0]["text"].split(" A: ", 1)[-1].split(" P: ")[0].rstrip(".") + " at the last visit.")
-    if docs:
-        lead.append("New report: " + docs[0]["text"].split("): ", 1)[-1])
-    result = [{"text": " ".join(lead), "cites": [i["id"] for i in (notes[:1] + docs[:1])], "flag": False}]
-    for i in notes + docs[1:]:
-        result.append({"text": i["text"], "cites": [i["id"]], "flag": False})
-    return {"items": result[:6]}
-
-
 
 MED = re.compile(r"\b([A-Z][a-zA-Z]+(?:\s+syrup)?)\s+(\d+(?:\.\d+)?\s*(?:mg|ml|mcg|g))\b", re.I)
 FREQ = re.compile(r"\b(once|twice|three times|thrice|four times)\s+(?:a\s+day|daily)|\b\d-\d-\d\b|\bevery\s+\d+\s+hours\b", re.I)
@@ -131,3 +106,39 @@ def draft_note(patient: dict, items: list[dict]) -> dict:
                 rx.append({"medicine": f"{m.group(1).title()} {m.group(2)}", "dose": freq.group(0) if freq else "as advised",
                            "duration": dur.group(1) if dur else "", "instructions": ""})
     return {"soap": {k: " ".join(v) for k, v in soap.items()}, "rx": rx, "citations": cites}
+
+
+VITALS = [("BP", "mmHg", r"\b(?:BP|blood pressure)\D{0,6}(\d{2,3}\s*/\s*\d{2,3})"),
+          ("Temperature", "°F", r"\btemp(?:erature)?\D{0,6}(\d{2,3}(?:\.\d)?)"),
+          ("Pulse", "/min", r"\b(?:pulse|PR|HR|heart rate)\D{0,6}(\d{2,3})"),
+          ("SpO2", "%", r"\bSpO2\D{0,6}(\d{2,3})"),
+          ("Weight", "kg", r"\b(?:weight|wt)\D{0,6}(\d{2,3}(?:\.\d)?)"),
+          ("HbA1c", "%", r"\bHbA1c\D{0,6}(\d{1,2}(?:\.\d)?)"),
+          ("Fasting sugar", "mg/dL", r"\b(?:FBS|fasting (?:blood )?(?:sugar|glucose))\D{0,6}(\d{2,3})"),
+          ("Random sugar", "mg/dL", r"\b(?:RBS|random (?:blood )?(?:sugar|glucose))\D{0,6}(\d{2,3})")]
+
+
+def note_values(soap: dict) -> list[dict]:
+    """[{"test", "value", "unit", "section"}] read from a signed note; each value must appear in its section."""
+    if enabled():
+        found = _gemini([{"text": _prompt("values.txt") + "\n\nNOTE: " + json.dumps(soap)}]).get("values") or []
+    else:
+        found = [{"test": t, "value": m.group(1).replace(" ", ""), "unit": u, "section": k}
+                 for k in ("O", "S", "A", "P") for t, u, rx in VITALS for m in re.finditer(rx, soap.get(k) or "", re.I)]
+    return [f for f in found if isinstance(f, dict) and f.get("section") in soap
+            and str(f.get("value", "")).replace(" ", "") in (soap.get(f["section"]) or "").replace(" ", "")]
+
+
+def brief_text(patient: dict, sources: dict, new_ids: list[str], visits: list[dict], use_ai: bool = True) -> dict:
+    """{"new": [...], "history": [...], "events": [...]}; sentences are checked by the caller."""
+    if use_ai and enabled():
+        listing = [{"id": k, "text": s["text"]} for k, s in sources.items()]
+        return _gemini([{"text": _prompt("brief_text.txt") + "\n\nPATIENT: " + json.dumps(patient)
+                         + "\n\nNEW DOCUMENTS: " + json.dumps(new_ids) + "\n\nVISITS: " + json.dumps([v["note"] for v in visits])
+                         + "\n\nSOURCES:\n" + json.dumps(listing)}])
+    first = lambda t: (sentences(t) or [""])[0]
+    new = [{"text": f"{sources[d]['label']}: {first(sources[d]['summary'])}", "cites": [d]} for d in new_ids]
+    history = [{"text": f"{v['date_text']}: {first(sources[v['note'] + '.A']['body'])}", "cites": [v["note"] + ".A"]}
+               for v in visits[:3] if v["note"] + ".A" in sources]
+    return {"new": new, "history": history, "events": []}
+
