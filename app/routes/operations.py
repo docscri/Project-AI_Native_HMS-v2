@@ -202,8 +202,6 @@ def charge(db, me, fee: int, body: Payment) -> dict:
     """Validated payment fields for a visit, with the next receipt number."""
     if body.discount > fee:
         raise HTTPException(422, "Discount cannot be more than the fee.")
-    if body.discount and not body.discount_reason.strip():
-        raise HTTPException(422, "Add a reason.")
     amount = fee - body.discount
     if amount > 0 and not body.payment_method:
         raise HTTPException(422, "Choose how the patient paid.")

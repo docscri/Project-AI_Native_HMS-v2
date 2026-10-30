@@ -53,7 +53,6 @@ def test_billing_discount_waiver_receipt_refund():
     with TestClient(app) as c:
         h, doc = setup(c, "bill@x.in")
         v1 = c.post("/api/visits", headers=h, json={"patient_id": patient(c, h, "P1"), "doctor_id": doc, "date": TODAY}).json()
-        assert c.post(f"/api/visits/{v1['id']}/arrive", headers=h, json={"payment_method": "cash", "discount": 100}).status_code == 422
         a1 = c.post(f"/api/visits/{v1['id']}/arrive", headers=h, json={"payment_method": "cash", "discount": 100, "discount_reason": "Staff family"}).json()
         assert a1["amount_paid"] == 200 and a1["receipt_no"] == 1
         w = c.post("/api/visits/walk-in", headers=h, json={"patient_id": patient(c, h, "P2"), "doctor_id": doc, "discount": 300, "discount_reason": "Free camp"}).json()

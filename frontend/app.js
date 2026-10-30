@@ -29,8 +29,7 @@ const feeTile = fee => `<div class="tk fee"><small>Fee</small><b id="pay-due">${
 function payBlock(fee, pay, feeShown) {
   return `<div class="pay-box">${feeShown ? "" : `<div class="tiles-row">${feeTile(fee)}</div>`}
     <div class="pay-line"><div class="seg" id="pay-seg">${[["cash", "Cash"], ["upi", "UPI"], ["card", "Card"], ["waive", "Waive"]].map(([m, l]) => `<button data-a="pay" data-v="${m}" aria-pressed="${m === pay}">${l}</button>`).join("")}</div>
-    <label class="field" id="pay-disc-wrap" ${pay === "waive" ? "hidden" : ""}>Discount (₹)<input type="number" min="0" max="${fee}" id="pay-disc" data-a="pay-disc" data-fee="${fee}" value=""></label>
-      <label class="field" id="pay-why-wrap" ${pay === "waive" ? "" : "hidden"}>Reason<input id="pay-why"></label></div></div>`;
+    <label class="field" id="pay-disc-wrap" ${pay === "waive" ? "hidden" : ""}>Discount (₹)<input type="number" min="0" max="${fee}" id="pay-disc" data-a="pay-disc" data-fee="${fee}" value=""></label></div></div>`;
 }
 function readPay(fee) {
   const pay = M.pay, why = $("#pay-why")?.value.trim() || "";
@@ -73,7 +72,7 @@ function toast(msg, err) {
 async function run(fn) { try { return await fn(); } catch (e) { toast(e.message, true); } }
 function modal(html, wide) {
   const old = $("#modal .modal"), top = old ? old.scrollTop : 0, scrim = $("#modal .scrim")?.scrollTop || 0;
-  $("#modal").innerHTML = html ? `<div class="scrim" data-a="scrim"><div class="modal ${wide ? "wide" : ""} ${old ? "re" : ""}" role="dialog" aria-modal="true">${html.includes("nv-x") ? "" : `<button class="icon-x modal-x" data-a="close-refresh" aria-label="Close">×</button>`}${html}</div></div>` : "";
+  $("#modal").innerHTML = html ? `<div class="scrim" data-a="scrim"><div class="modal ${wide ? "wide" : ""} ${old ? "re" : ""}" role="dialog" aria-modal="true">${html.includes("nv-x") || /data-a="close(-refresh)?"[^>]*>(Cancel|Close)</.test(html) ? "" : `<button class="icon-x modal-x" data-a="close-refresh" aria-label="Close">×</button>`}${html}</div></div>` : "";
   if (html && old) { $("#modal .modal").scrollTop = top; $("#modal .scrim").scrollTop = scrim; }
 }
 const closeModal = () => { modal(""); M = null; };

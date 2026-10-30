@@ -1000,3 +1000,7 @@ table.members tr.click:hover td:first-child b { text-decoration-color: var(--ink
 .pay-line:has(#pay-disc-wrap:not([hidden])) #pay-why-wrap { grid-column: 1 / -1; }
 .pay-line input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
 .pay-line input[type="number"]::-webkit-inner-spin-button, .pay-line input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+/* room between the corner × and anything in the dialog's top row */
+.modal-x + h2, .modal-x + .mb-head { padding-right: 56px; }
+.modal-x + .mb-head { margin-top: 4px; }
+.pay-line:has(#pay-disc-wrap[hidden]) { grid-template-columns: 1fr; }
