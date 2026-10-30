@@ -1004,3 +1004,9 @@ table.members tr.click:hover td:first-child b { text-decoration-color: var(--ink
 .modal-x + h2, .modal-x + .mb-head { padding-right: 56px; }
 .modal-x + .mb-head { margin-top: 4px; }
 .pay-line:has(#pay-disc-wrap[hidden]) { grid-template-columns: 1fr; }
+
+/* note pop-up: slimmer bottom bar */
+.nv-dock { min-height: 52px; padding: 5px 5px 5px 22px; }
+.nv-dock .dock-msg { font-size: 13px; }
+.nv-dock .dock-go { min-height: 42px; padding: 0 22px; font-size: 14.5px; box-shadow: none; }
+.modal-x + .actions { padding-right: 56px; }

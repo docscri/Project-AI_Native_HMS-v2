@@ -418,8 +418,8 @@ function renderBooking() {
         : `<input class="input" id="bk-q" placeholder="Search name, phone or UHID" value="${esc(b.q)}" data-a="bk-q" autocomplete="off">
            <div class="pick">${b.results.map(r => `<button data-a="bk-pick" data-v="${r.id}"><span><b>${esc(r.name)}</b> · ${esc(r.phone)}</span><span class="mono muted">${esc(r.uhid)}</span></button>`).join("")}</div>`}
     <div class="grid2 booking-fields">
-      ${b.mode === "walk" ? "" : `<label class="field">Date<input type="date" id="bk-date" min="${TODAY}" value="${b.date}" data-a="bk-date"></label>`}
-      <label class="field">Doctor<select id="bk-doc" data-a="bk-doc">${S.doctors.map(d => `<option value="${d.id}" ${d.id === b.doctorId ? "selected" : ""}>${esc(d.name)}</option>`).join("")}</select></label>
+      ${b.mode === "walk" ? "" : `<label class="field"><input type="date" aria-label="Date" id="bk-date" min="${TODAY}" value="${b.date}" data-a="bk-date"></label>`}
+      <label class="field"><select aria-label="Doctor" id="bk-doc" data-a="bk-doc">${S.doctors.map(d => `<option value="${d.id}" ${d.id === b.doctorId ? "selected" : ""}>${esc(d.name)}</option>`).join("")}</select></label>
     </div>
     ${sessChips}
     ${slot}
@@ -518,7 +518,7 @@ function leaveEditor() {
   const l = M.leave;
   return `<div class="hit choices"><h3>${l.all ? "Clinic holiday" : `${esc(S.doctors.find(d => d.id === M.doctorId)?.name || "Doctor")} · Leave`}</h3>
     <div class="date-row"><input class="date-pill" aria-label="From" type="date" id="lv-from" min="${TODAY}" value="${l.from}"><input class="date-pill" aria-label="To" type="date" id="lv-to" min="${TODAY}" value="${l.to}"></div>
-    <div class="foot"><button class="btn" data-a="lv-back">Back</button><button class="btn" data-a="lv-save" data-v="0">Working</button><button class="btn primary" data-a="lv-save" data-v="1">${l.all ? "Holiday" : "Leave"}</button></div></div>`;
+    <div class="foot"><button class="btn" data-a="lv-save" data-v="0">Working</button><button class="btn primary" data-a="lv-save" data-v="1">${l.all ? "Holiday" : "Leave"}</button></div></div>`;
 }
 
 /* members */
@@ -576,7 +576,7 @@ function openShare(what, id, code, emailOn) {
     <div class="pt-chip share-chip"><span class="avatar">${esc(initials(m?.name || "?"))}</span><span class="pt-main"><b>${esc(m?.name || "")}</b><span class="pt-meta"><span>${esc(m?.email || "")}</span><span>${what === "invite" ? "7 days" : "2 hours"}</span></span></span></div>
     <div class="share-row">${emailOn ? `<button class="share-opt" data-a="share-email"><b>Email link</b></button>` : ""}
       <button class="share-opt" data-a="share-copy"><b>Copy link</b></button></div>
-    <div class="foot"><button class="btn" data-a="share-back">Back</button><button class="btn primary" data-a="close">Done</button></div>`);
+    <div class="foot"><button class="btn primary" data-a="close">Done</button></div>`);
 }
 function copyLink(link, msg) {
   navigator.clipboard?.writeText(link).then(() => toast(msg), () => { M = { kind: "link" }; modal(`<h2>Share this link</h2><label class="field">Link<input readonly value="${esc(link)}" onfocus="this.select()"></label><div class="foot"><button class="btn primary" data-a="close">Done</button></div>`); });
@@ -999,7 +999,7 @@ function renderMerge() {
     ${m.other ? `<div class="hit actions" style="justify-content:space-between;align-items:center"><span><b>${esc(m.other.name)}</b> · ${esc(m.other.phone || "—")}</span><span class="mono muted">${esc(m.other.uhid)}</span></div>`
       : `<input class="input" id="mg-q" placeholder="Search name, phone or UHID" value="${esc(m.q)}" data-a="mg-q" autocomplete="off">
          <div class="pick">${m.results.filter(x => x.id !== m.id).map(x => `<button data-a="mg-pick" data-v="${x.id}"><span><b>${esc(x.name)}</b> · ${esc(x.phone || "—")}</span><span class="mono muted">${esc(x.uhid)}</span></button>`).join("")}</div>`}
-    <div class="foot"><button class="btn" data-a="${m.other ? "mg-clear" : "close"}">Back</button><button class="btn danger" data-a="mg-go" ${m.other ? "" : "disabled"}>Merge</button></div>`);
+    <div class="foot"><button class="btn danger" data-a="mg-go" ${m.other ? "" : "disabled"}>Merge</button></div>`);
   const q = $("#mg-q"); if (q) { q.focus(); q.setSelectionRange(q.value.length, q.value.length); }
 }
 function openPatientEdit(p) {
@@ -1163,7 +1163,6 @@ document.addEventListener("click", e => {
       case "share-copy": copyLink(M.link, M.what === "invite" ? "Invite link copied · valid 7 days" : "Reset link copied · valid 2 hours"); break;
       case "share-email": { const r = M.what === "invite" ? await api(`/members/${M.id}/invite/email`, { body: {} }) : await api(`/members/${M.id}/reset-link/email`, { body: { code: M.code } });
         toast(`${M.what === "invite" ? "Invite" : "Reset link"} emailed to ${r.email}`); break; }
-      case "share-back": { const back = M.back; if (back?.kind === "member") openMember(back.mkind, back.m); else closeModal(); break; }
       case "account": await openAccount(); break;
       case "ac-save": {
         const nw = $("#ac-new").value;
@@ -1202,9 +1201,7 @@ document.addEventListener("click", e => {
       case "rg-use": { const p = M.same.find(x => x.id === Number(v));
         if (M.back) { const back = M.back; M = back; M.patient = p; renderBooking(); } else { closeModal(); location.hash.startsWith("#/consult") ? go(`#/consult?doctor=${S.data.doctorId}&patient=${p.id}`) : go(`#/patients/${p.id}`); }
         break; }
-      case "rg-again": { const f = M.form, back = M.back; openRegister(f.name); M.back = back; $("#rg-phone").value = f.phone; $("#rg-dob").value = f.dob || ""; $("#rg-sex").value = f.sex; $("#rg-addr").value = f.address || ""; $("#rg-consent").checked = !!f.consent; break; }
       case "pt-merge": M = { kind: "merge", id: Number(v), q: "", results: [] }; renderMerge(); break;
-      case "mg-clear": M.other = null; renderMerge(); break;
       case "mg-pick": M.other = M.results.find(x => x.id === Number(v)); renderMerge(); break;
       case "mg-go": { const p = await api(`/patients/${M.id}/merge`, { body: { other_id: M.other.id } }); closeModal(); toast(`Merged into ${p.uhid}`); go(`#/patients/${p.id}`); route(); break; }
       case "rg-back": { const back = M.back; M = back; renderBooking(); break; }
@@ -1216,7 +1213,7 @@ document.addEventListener("click", e => {
           if (same.length) {
             M.form = f; M.same = same;
             modal(`<h2>Same person?</h2><div class="pick">${same.map(x => `<button data-a="rg-use" data-v="${x.id}"><span><b>${esc(x.name)}</b> · ${esc(x.phone || "—")}${x.dob ? " · " + ageOf(x.dob) : ""} ${esc(x.sex || "")}</span><span class="mono muted">${esc(x.uhid)}</span></button>`).join("")}</div>
-              <div class="foot"><button class="btn" data-a="rg-again">Back</button><button class="btn primary" data-a="rg-new">New patient</button></div>`);
+              <div class="foot"><button class="btn primary" data-a="rg-new">New patient</button></div>`);
             break;
           }
         }
@@ -1255,7 +1252,6 @@ document.addEventListener("click", e => {
         $(`#${pp}-lim`).innerHTML = limitBlock(pp, vals); break; }
       case "lv-open": M.leave = { from: M.sel && M.sel >= TODAY ? M.sel : TODAY, to: M.sel && M.sel >= TODAY ? M.sel : TODAY, all: v === "all" }; renderSched(); break;
       case "lv-who": M.leave.from = $("#lv-from").value; M.leave.to = $("#lv-to").value; M.leave.all = v === "all"; renderSched(); break;
-      case "lv-back": M.leave = null; renderSched(); break;
       case "lv-save": { const l = M.leave, from = $("#lv-from").value, to = $("#lv-to").value || from;
         const r = await api("/schedules/leave", { body: { start_date: from, end_date: to, doctor_id: l.all ? null : M.doctorId, off: v === "1" } });
         toast(`${r.days} day${r.days > 1 ? "s" : ""} ${v === "1" ? (M.leave.all ? "holiday" : "leave") : "working"}${r.bookings_affected ? ` · ${r.bookings_affected} booking${r.bookings_affected > 1 ? "s" : ""} to move` : ""}`, r.bookings_affected > 0);
@@ -1386,6 +1382,7 @@ function enhance(root) {
   root.querySelectorAll("label.field:not(.fl)").forEach(f => {
     const ctl = f.querySelector("input, select, textarea"); if (!ctl) return;
     const text = textOf(f); [...f.childNodes].forEach(n => { if (n.nodeType === 3) n.remove(); });
+    if (!text) return;   // no label: a plain pill
     f.classList.add("fl");
     if (!ctl.getAttribute("aria-label")) ctl.setAttribute("aria-label", text);
     const span = document.createElement("span"); span.className = "fl-label"; span.textContent = text; f.prepend(span);
