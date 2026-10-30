@@ -237,7 +237,7 @@ def draft(visit_id: int, me=Depends(doctor_screen), db=Depends(get_db)):
     d = ai.draft_note(patient, items)
     content = json.dumps({"soap": d["soap"], "rx": d["rx"]})
     if existing:
-        if db.execute("update notes set content = ?, citations = ?, updated_at = ? where id = ? and status = 'draft'",
+        if db.execute("update notes set content = ?, citations = ?, edited = 0, updated_at = ? where id = ? and status = 'draft'",
                       (content, json.dumps(d["citations"]), now(), existing["id"])).rowcount != 1:
             raise HTTPException(409, "Note is signed.")
     else:
@@ -289,8 +289,10 @@ def edit_note(note_id: int, body: NoteEdit, me=Depends(doctor_screen), db=Depend
         raise HTTPException(404, "Note not found.")
     if n["status"] == "signed":
         raise HTTPException(409, "Note is signed.")
-    if db.execute("update notes set content = ?, updated_at = ? where id = ? and status = 'draft'",
-                  (json.dumps({"soap": body.soap, "rx": body.rx}), now(), note_id)).rowcount != 1:
+    new = {"soap": body.soap, "rx": body.rx}
+    edited = 1 if new != json.loads(n["content"]) else n["edited"]
+    if db.execute("update notes set content = ?, edited = ?, updated_at = ? where id = ? and status = 'draft'",
+                  (json.dumps(new), edited, now(), note_id)).rowcount != 1:
         raise HTTPException(409, "Note is signed.")
     return load_note(db, n["visit_id"])
 

@@ -784,7 +784,7 @@ function noteDock(v) {
   if (signed) return `<div class="dock"><span class="dock-msg ok">Signed · ${stampOf(n.signed_at)}${n.signed_by_name ? " · " + esc(n.signed_by_name) : ""}</span><span class="grow"></span><button class="dock-go" data-a="note-print" data-v="${n.id}">Print</button></div>`;
   if (S.noteEdit) return `<div class="dock"><span class="dock-msg">Editing.</span><span class="grow"></span><button class="dock-go" data-a="note-done">Save</button></div>`;
   return `<div class="dock"><span class="dock-msg">${S.aiOn ? "Drafted by AI." : "Draft."}</span><span class="grow"></span>
-    <button class="dock-ghost" data-a="note-edit">Edit</button>${v.status === "with_doctor" ? `<button class="dock-ghost" data-a="cs-draft" data-v="${v.id}">Revalidate</button>` : ""}<button class="dock-go" data-a="note-sign-ro" data-v="${n.id}">Sign note</button></div>`;
+    <button class="dock-ghost" data-a="note-edit">Edit</button>${v.status === "with_doctor" ? `<button class="dock-ghost" data-a="cs-redraft" data-v="${v.id}">Redraft</button>` : ""}<button class="dock-go" data-a="note-sign-ro" data-v="${n.id}">Sign note</button></div>`;
 }
 function rightCol() {
   const D = S.data, p = D.profile;
@@ -1375,6 +1375,11 @@ document.addEventListener("click", e => {
       case "cs-open": go(`#/consult/${v}?doctor=${D.doctorId}`); break;
       case "cs-start": await api(`/visits/${v}/start`, { body: {} }); refreshConsult(); break;
       case "cs-brief": await api(`/visits/${v}/brief`, { body: {} }); toast("Brief updated"); refreshConsult(); break;
+      case "cs-redraft":   // asks first only when the doctor changed the draft by hand
+        if (D.cur?.note?.edited) { modal(`<h2>Replace your edits?</h2><div class="foot"><button class="btn danger" data-a="cs-redraft-go" data-v="${v}">Replace</button></div>`); break; }
+      // falls through
+      case "cs-redraft-go": if (a === "cs-redraft-go") closeModal();
+      // falls through
       case "cs-draft": if (!(await flushText(Number(v)))) break; if (S.recState) await stopMic(); S.ctab = "note"; S.drafting = Number(v); S.noteEdit = false; renderConsult();
         try { await Promise.all([api(`/visits/${v}/note/draft`, { body: {} }), new Promise(r => setTimeout(r, 1400))]); } finally { S.drafting = null; S.dictDone = null; } refreshConsult(); break;
       case "mic": if (S.recState) await stopMic(); else { S.ctab = "dictate"; startMic(Number(v)); } break;

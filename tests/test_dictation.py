@@ -111,3 +111,16 @@ def test_dictated_paragraph_is_cited_by_sentence():
         cited = {k: v for k, v in n["citations"].items() if v}
         assert cited["S"] == ["T1"] and cited["O"] == ["T2"] and cited["A"] == ["T3"]
         assert "100.8" in n["content"]["soap"]["O"]
+
+
+def test_hand_edits_are_flagged_until_redraft():
+    with TestClient(app) as c:
+        h, doc = clinic(c, "d6@x.in")
+        v = started_visit(c, h, doc)
+        c.put(f"/api/visits/{v['id']}/text", headers=h, json={"text": "Fever for two days. Likely viral fever.", "rev": 0})
+        n = c.post(f"/api/visits/{v['id']}/note/draft", headers=h).json()
+        assert n["edited"] == 0
+        assert c.put(f"/api/notes/{n['id']}", headers=h, json=n["content"]).json()["edited"] == 0     # unchanged save
+        changed = {**n["content"], "soap": {**n["content"]["soap"], "A": "Viral fever, mild."}}
+        assert c.put(f"/api/notes/{n['id']}", headers=h, json=changed).json()["edited"] == 1
+        assert c.post(f"/api/visits/{v['id']}/note/draft", headers=h).json()["edited"] == 0
