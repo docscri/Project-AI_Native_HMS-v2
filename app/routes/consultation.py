@@ -38,6 +38,7 @@ def load_note(db, visit_id: int) -> dict | None:
     if n:
         n["content"] = json.loads(n["content"])
         n["citations"] = json.loads(n["citations"])
+        n["sources"] = json.loads(n.get("sources") or "{}")
     return n
 
 
@@ -236,13 +237,16 @@ def draft(visit_id: int, me=Depends(doctor_screen), db=Depends(get_db)):
         raise HTTPException(422, "Dictate or add a document first.")
     d = ai.draft_note(patient, items)
     content = json.dumps({"soap": d["soap"], "rx": d["rx"]})
+    cited = {c for ids in d["citations"].values() for c in ids}
+    # Saved so citations keep pointing at the right words if the transcript changes later.
+    sources = json.dumps({i["id"]: i["text"] for i in items if i["kind"] == "transcript" and i["id"] in cited})
     if existing:
-        if db.execute("update notes set content = ?, citations = ?, edited = 0, updated_at = ? where id = ? and status = 'draft'",
-                      (content, json.dumps(d["citations"]), now(), existing["id"])).rowcount != 1:
+        if db.execute("update notes set content = ?, citations = ?, sources = ?, edited = 0, updated_at = ? where id = ? and status = 'draft'",
+                      (content, json.dumps(d["citations"]), sources, now(), existing["id"])).rowcount != 1:
             raise HTTPException(409, "Note is signed.")
     else:
-        db.execute("insert into notes (clinic_id, patient_id, visit_id, doctor_id, content, citations) values (?, ?, ?, ?, ?, ?)",
-                   (me["clinic_id"], v["patient_id"], visit_id, v["doctor_id"], content, json.dumps(d["citations"])))
+        db.execute("insert into notes (clinic_id, patient_id, visit_id, doctor_id, content, citations, sources) values (?, ?, ?, ?, ?, ?, ?)",
+                   (me["clinic_id"], v["patient_id"], visit_id, v["doctor_id"], content, json.dumps(d["citations"]), sources))
     log_event(db, me["clinic_id"], me["id"], "note", visit_id, "drafted")
     return load_note(db, visit_id)
 

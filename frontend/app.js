@@ -743,7 +743,7 @@ function soapRead(v, n, still) {
   const sec = (k, label, body) => `<div class="soap-sec"><b class="soap-tile">${k}</b><div><span class="soap-label">${label}</span><div class="soap-body">${body}</div></div></div>`;
   const out = SOAP.map(([k, label]) => {
     const text = (n.content.soap[k] || "").trim();
-    const sents = text ? text.match(/[^.!?]+[.!?]*/g).map(x => x.trim()).filter(Boolean) : [];
+    const sents = sentences(text).map(x => x.text);
     const srcs = (n.citations?.[k] || []).map(id => ({ id, text: sourceOf(v, id)?.text || "" }));
     return sec(k, label, sents.map(t => `<span class="nb">${++num}</span>${marked(t, srcs, still)}`).join(" ") || `<span class="muted">—</span>`);
   }).join("");
@@ -796,7 +796,7 @@ function rightCol() {
     <div class="cx-row"><span>Visits</span><b>${p.visits.filter(x => x.status === "done").length}</b></div></div>`;
 }
 function sourceOf(v, id) {
-  if (id.startsWith("T")) { const p = sentences(freeText(v))[Number(id.slice(1)) - 1]; return p && { kind: "Transcript", text: p.text }; }
+  if (id.startsWith("T")) { const t = v.note?.sources?.[id] ?? sentences(freeText(v))[Number(id.slice(1)) - 1]?.text; return t && { kind: "Transcript", text: t }; }
   if (id.startsWith("D")) { const d = v.documents.find(x => "D" + x.id === id); return d && { kind: "Document", text: d.filename + (d.extracted?.findings?.length ? " — " + d.extracted.findings.slice(0, 3).map(f => `${f.name} ${f.value} ${f.unit || ""}`.trim()).join(", ") : "") }; }
   if (id.startsWith("N")) return { kind: "Earlier note", text: "Signed note from a previous visit" };
   return null;
@@ -875,7 +875,11 @@ async function stopMic() {
 }
 function speech(visitId, text, final) {
   const el = $("#free-text"); if (!el || el.readOnly || Number(el.dataset.v) !== visitId) return;
-  if (!S.dict || (!S.dict.len && document.activeElement === el)) S.dict = { start: document.activeElement === el ? el.selectionEnd : el.value.length, len: 0 };
+  if (!S.dict || (!S.dict.len && !S.dict.kept && document.activeElement === el)) S.dict = { start: document.activeElement === el ? el.selectionEnd : el.value.length, len: 0 };
+  const kept = S.dict.kept;   // words already left in the box when the doctor typed
+  if (kept && text.toLowerCase().startsWith(kept.toLowerCase())) text = text.slice(kept.length).trimStart();
+  if (final) S.dict.kept = "";
+  if (!text) return;
   putSpeech(el, final ? text + " " : text, final);
   edit(visitId, el.value);
 }
@@ -931,12 +935,20 @@ async function streamMic(visitId) {
     if (ws.readyState === 1) { ws.send("stop"); await Promise.race([done, new Promise(r => setTimeout(r, 8000))]); } else ws.close();
   };
 }
+// The doctor typed while words were still being recognised: keep those words, and let the rest of
+// the phrase continue right after them (shifted if the typing happened before them).
+function typedOver(d, el) {
+  if (!d.len && !d.kept) return { start: el.selectionEnd, len: 0 };
+  const was = S.ft?.id === Number(el.dataset.v) ? S.ft.text : null, shift = was == null ? 0 : el.value.length - was.length;
+  const after = el.selectionEnd - shift >= d.start + d.len;
+  return { start: d.start + d.len + (after ? 0 : shift), len: 0, kept: d.len ? d.said || "" : d.kept };
+}
 function putSpeech(el, text, final) {
   const d = S.dict, before = el.value.slice(0, d.start);
   const pad = before && !/\s$/.test(before) ? " " : "";
   if (!before.trim() || /[.!?]\s*$/.test(before)) text = text.charAt(0).toUpperCase() + text.slice(1);
   el.setRangeText(pad + text, d.start, d.start + d.len, "end");
-  if (final) { d.start += pad.length + text.length; d.len = 0; } else d.len = pad.length + text.length;
+  if (final) { d.start += pad.length + text.length; d.len = 0; } else { d.len = pad.length + text.length; d.said = (d.kept ? d.kept + " " : "") + text; }
   if (document.activeElement === el) el.setSelectionRange(d.start + d.len, d.start + d.len);
 }
 // Same split as the server's ai.sentences(): T1, T2… are sentences; 100.8 stays whole.
@@ -1392,9 +1404,9 @@ document.addEventListener("click", e => {
       case "note-print": window.open(`/api/notes/${v}/print?auto=1&token=${encodeURIComponent(S.token)}`, "_blank"); break;
       case "print": window.open(`/api/notes/${v}/print?token=${encodeURIComponent(S.token)}`, "_blank"); break;
       case "open-doc": { const res = await fetch(`/api/documents/${v}/file`, { headers: { Authorization: "Bearer " + S.token } }); window.open(URL.createObjectURL(await res.blob()), "_blank"); break; }
-      case "cite": if (v.startsWith("T")) { const p = sentences(freeText(D.cur))[Number(v.slice(1)) - 1]; if (!p) break;
+      case "cite": if (v.startsWith("T")) { const src = sourceOf(D.cur, v); if (!src) break;
         if (S.ctab !== "dictate") { S.ctab = "dictate"; renderConsult(); }
-        const ta = $("#free-text"); ta.focus(); ta.setSelectionRange(p.from, p.to); break; }
+        const ta = $("#free-text"), at = ta.value.indexOf(src.text); ta.focus(); if (at >= 0) ta.setSelectionRange(at, at + src.text.length); break; }
       { const el = document.getElementById("ev-" + v); if (el) { el.scrollIntoView({ behavior: "smooth", block: "nearest" }); el.classList.add("hl"); setTimeout(() => el.classList.remove("hl"), 1800); } else toast(v.startsWith("N") ? "From an earlier note." : "Source: " + v); break; }
     }
   });
@@ -1411,7 +1423,7 @@ document.addEventListener("input", e => {
   const a = e.target.dataset?.a;
   if (a === "bk-q") searchPatients(e.target.value);
   if (a === "pay-disc") payShow();
-  if (a === "free-text") { if (S.dict) S.dict = { start: e.target.selectionEnd, len: 0 }; edit(Number(e.target.dataset.v), e.target.value); }
+  if (a === "free-text") { if (S.dict) S.dict = typedOver(S.dict, e.target); edit(Number(e.target.dataset.v), e.target.value); }
   if (a === "up-file") { const f = e.target.files[0]; $("#up-name").textContent = f ? f.name : "No file"; $(".file-drop").classList.toggle("has", !!f); }
   if (a === "mg-q") { M.q = e.target.value; clearTimeout(searchT); searchT = setTimeout(() => run(async () => { if (M?.kind !== "merge") return; M.results = M.q.trim() ? await api(`/patients?q=${encodeURIComponent(M.q)}`) : []; renderMerge(); }), 180); }
   if (a === "vf-q") { S.vf.q = e.target.value; const r = $("#ops-rows"); if (r && S.data?.visits) r.innerHTML = opsRows(S.data.visits); }

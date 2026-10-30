@@ -124,3 +124,15 @@ def test_hand_edits_are_flagged_until_redraft():
         changed = {**n["content"], "soap": {**n["content"]["soap"], "A": "Viral fever, mild."}}
         assert c.put(f"/api/notes/{n['id']}", headers=h, json=changed).json()["edited"] == 1
         assert c.post(f"/api/visits/{v['id']}/note/draft", headers=h).json()["edited"] == 0
+
+
+def test_citations_keep_their_sentences_after_the_transcript_changes():
+    with TestClient(app) as c:
+        h, doc = clinic(c, "d7@x.in")
+        v = started_visit(c, h, doc)
+        c.put(f"/api/visits/{v['id']}/text", headers=h, json={"text": "Fever for two days. Likely viral fever.", "rev": 0})
+        n = c.post(f"/api/visits/{v['id']}/note/draft", headers=h).json()
+        assert n["sources"] == {"T1": "Fever for two days.", "T2": "Likely viral fever."}
+        rev = c.get(f"/api/visits/{v['id']}", headers=h).json()["text_rev"]
+        c.put(f"/api/visits/{v['id']}/text", headers=h, json={"text": "Came with mother. Fever for two days. Likely viral fever.", "rev": rev})
+        assert c.get(f"/api/visits/{v['id']}", headers=h).json()["note"]["sources"]["T2"] == "Likely viral fever."
