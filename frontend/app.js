@@ -90,7 +90,7 @@ async function boot() {
   await run(async () => {
     const r = await api("/me");
     S.me = r.member; S.clinic = r.clinic; S.doctors = await api("/doctors");
-    api("/dictation").then(d => { S.dictBy = d.provider; }, () => {});
+    api("/dictation").then(d => { S.dictBy = d.provider; S.aiOn = d.ai; }, () => {});
   });
   route();
 }
@@ -617,7 +617,7 @@ async function viewConsult(visitId, doctorParam, patientParam) {
     if (cur) { S.textRev = S.textRev || {}; S.textRev[cur.id] = Math.max(S.textRev[cur.id] ?? 0, cur.text_rev ?? 0); }
     S.data = { today, cur, profile, found, doctorId, pid };
     renderConsult();
-    if (cur && cur.status === "with_doctor" && !cur.brief && !S.briefing) {
+    if (cur && ["waiting", "with_doctor"].includes(cur.status) && !cur.brief && !S.briefing) {
       S.briefing = true;
       run(async () => { try { await api(`/visits/${cur.id}/brief`, { body: {} }); } finally { S.briefing = false; } refreshConsult(); });
     }
@@ -677,7 +677,7 @@ function dock(v) {
   }
   const n = v.note, canDraft = v.status === "with_doctor" && n?.status !== "signed" && (freeText(v).trim() || v.documents.some(d => d.ai_status === "ready"));
   if (S.ctab === "dictate" && S.dictDone === v.id && canDraft)
-    return `<div class="dock"><span class="dock-msg">Transcript finalized.</span><span class="grow"></span><button class="dock-ghost" data-a="cs-mic" data-v="${v.id}">Dictate more</button><button class="dock-go" data-a="cs-draft" data-v="${v.id}">Generate SOAP note</button></div>`;
+    return `<div class="dock"><span class="dock-msg ok">Transcript finalized.</span><span class="grow"></span><button class="dock-ghost" data-a="cs-mic" data-v="${v.id}">Dictate more</button><button class="dock-go" data-a="cs-draft" data-v="${v.id}">Generate SOAP note</button></div>`;
   return micBtn(v);
 }
 const sideBtn = () => !S.rightCollapsed ? "" : `<button class="cx-side-btn" data-a="cs-collapse" aria-label="${S.rightCollapsed ? "Show side panel" : "Hide side panel"}" title="${S.rightCollapsed ? "Show side panel" : "Hide side panel"}"><i></i><i></i></button>`;
@@ -721,7 +721,7 @@ function center() {
 function paneBrief(v) {
   const items = v.brief?.items || [];
   const lead = items[0], rest = items.slice(1);
-  if (!lead) return v.status === "with_doctor" ? `<p class="muted cx-lead">Preparing brief…</p>` : "";
+  if (!lead) return ["waiting", "with_doctor"].includes(v.status) ? `<p class="muted cx-lead">Preparing brief…</p>` : "";
   return `<p class="cx-lead">${esc(lead.text)}${citeBtns(lead.cites)}</p>
     ${rest.length ? `<div class="cx-events">${rest.map(i => `<div class="${i.flag ? "flag" : ""}"><span>${i.flag ? "⚠" : "•"}</span><span>${esc(i.text)}${citeBtns(i.cites)}</span></div>`).join("")}</div>` : ""}`;
 }
@@ -783,7 +783,7 @@ function noteDock(v) {
   }
   if (signed) return `<div class="dock"><span class="dock-msg ok">Signed · ${stampOf(n.signed_at)}${n.signed_by_name ? " · " + esc(n.signed_by_name) : ""}</span><span class="grow"></span><button class="dock-go" data-a="note-print" data-v="${n.id}">Print</button></div>`;
   if (S.noteEdit) return `<div class="dock"><span class="dock-msg">Editing.</span><span class="grow"></span><button class="dock-go" data-a="note-done">Save</button></div>`;
-  return `<div class="dock"><span class="dock-msg">${Object.values(n.citations || {}).some(x => x.length) ? "Drafted by AI." : "Draft."}</span><span class="grow"></span>
+  return `<div class="dock"><span class="dock-msg">${S.aiOn ? "Drafted by AI." : "Draft."}</span><span class="grow"></span>
     <button class="dock-ghost" data-a="note-edit">Edit</button>${v.status === "with_doctor" ? `<button class="dock-ghost" data-a="cs-draft" data-v="${v.id}">Revalidate</button>` : ""}<button class="dock-go" data-a="note-sign-ro" data-v="${n.id}">Sign note</button></div>`;
 }
 function rightCol() {

@@ -4,7 +4,7 @@ from contextlib import suppress
 from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
 from starlette.websockets import WebSocketState
 
-from .. import transcribe
+from .. import ai, transcribe
 from ..auth import current_member, member_for_token, public_member
 from ..db import connect
 from .consultation import editable
@@ -16,7 +16,7 @@ _active: set[int] = set()   # one live stream per visit (single server process)
 
 @router.get("/dictation")
 def provider(me=Depends(current_member)):
-    return {"provider": "deepgram" if transcribe.enabled() else "browser"}
+    return {"provider": "deepgram" if transcribe.enabled() else "browser", "ai": ai.enabled()}
 
 
 def _check(token: str, visit_id: int) -> str | None:

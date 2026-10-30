@@ -978,3 +978,7 @@ table.members tr.click:hover td:first-child b { text-decoration-color: var(--ink
 .nv-top { padding-right: 72px; }
 .nv-top .btn.small { min-height: var(--ctl-sm); }
 .modal-x + div > h2:first-child { padding-right: 56px; }
+/* recording bar: pause and stop the same size; text fades out under the floating bar */
+.cx-float .dock-round, .cx-float .dock-stop { width: 42px; height: 42px; }
+.cx-float::before { content: ""; position: absolute; inset: 0; border-radius: 0 0 24px 24px; background: linear-gradient(to bottom, transparent, var(--surface) 55%); pointer-events: none; }
+.cx-float > * { position: relative; }

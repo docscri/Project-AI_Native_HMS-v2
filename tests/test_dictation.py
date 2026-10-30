@@ -36,9 +36,11 @@ def test_provider_follows_key(monkeypatch):
     with TestClient(app) as c:
         h, _ = clinic(c, "d0@x.in")
         monkeypatch.delenv("DEEPGRAM_API_KEY", raising=False)
-        assert c.get("/api/dictation", headers=h).json() == {"provider": "browser"}
+        monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+        assert c.get("/api/dictation", headers=h).json() == {"provider": "browser", "ai": False}
         monkeypatch.setenv("DEEPGRAM_API_KEY", "k")
-        assert c.get("/api/dictation", headers=h).json() == {"provider": "deepgram"}
+        monkeypatch.setenv("GEMINI_API_KEY", "g")
+        assert c.get("/api/dictation", headers=h).json() == {"provider": "deepgram", "ai": True}
 
 
 def test_text_streams_back_and_last_words_arrive(deepgram):
