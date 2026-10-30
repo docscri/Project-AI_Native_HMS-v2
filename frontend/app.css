@@ -989,3 +989,14 @@ table.members tr.click:hover td:first-child b { text-decoration-color: var(--ink
 .modal { position: relative; }
 .modal-x { position: absolute; top: 18px; right: 18px; z-index: 5; }
 .modal > h2:first-of-type { padding-right: 44px; }
+
+/* payment: method and discount share one line; fee sits beside token and left */
+.tk.fee b { color: var(--ink); }
+.pay-line { display: grid; grid-template-columns: minmax(0, 1fr) 170px; gap: 10px; align-items: center; }
+.pay-line .seg { display: flex; width: 100%; flex-wrap: nowrap; }
+.pay-line .seg button { flex: 1; padding: 0 10px; }
+.pay-line .field { margin: 0; }
+@media (max-width: 560px) { .pay-line { grid-template-columns: 1fr; } }
+.pay-line:has(#pay-disc-wrap:not([hidden])) #pay-why-wrap { grid-column: 1 / -1; }
+.pay-line input[type="number"] { -moz-appearance: textfield; appearance: textfield; }
+.pay-line input[type="number"]::-webkit-inner-spin-button, .pay-line input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }

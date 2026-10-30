@@ -24,10 +24,12 @@ const CANCEL_REASONS = ["Patient asked", "Doctor unavailable", "Booked by mistak
 const RESCHED_REASONS = ["Patient asked", "Doctor unavailable", "Clinic change"];
 const REFUND_REASONS = ["Charged twice", "Visit not done", "Fee changed"];
 const reasonChips = (list, cur, a) => `<div class="seg reason-seg">${list.map(r => `<button data-a="${a}" data-v="${esc(r)}" aria-pressed="${r === cur}">${r}</button>`).join("")}</div>`;
-function payBlock(fee, pay) {
-  return `<div class="pay-box"><div class="tiles-row"><div class="tk big"><small>Fee</small><b id="pay-due">${rupees(fee)}</b></div></div>
-    <div class="seg" id="pay-seg">${[["cash", "Cash"], ["upi", "UPI"], ["card", "Card"], ["waive", "Waive"]].map(([m, l]) => `<button data-a="pay" data-v="${m}" aria-pressed="${m === pay}">${l}</button>`).join("")}</div>
-    <div class="grid2"><label class="field" id="pay-disc-wrap" ${pay === "waive" ? "hidden" : ""}>Discount (₹)<input type="number" min="0" max="${fee}" id="pay-disc" data-a="pay-disc" data-fee="${fee}" value=""></label>
+const feeTile = fee => `<div class="tk fee"><small>Fee</small><b id="pay-due">${rupees(fee)}</b></div>`;
+// Fee tile (unless it already sits beside the token), then payment method and discount on one line.
+function payBlock(fee, pay, feeShown) {
+  return `<div class="pay-box">${feeShown ? "" : `<div class="tiles-row">${feeTile(fee)}</div>`}
+    <div class="pay-line"><div class="seg" id="pay-seg">${[["cash", "Cash"], ["upi", "UPI"], ["card", "Card"], ["waive", "Waive"]].map(([m, l]) => `<button data-a="pay" data-v="${m}" aria-pressed="${m === pay}">${l}</button>`).join("")}</div>
+    <label class="field" id="pay-disc-wrap" ${pay === "waive" ? "hidden" : ""}>Discount (₹)<input type="number" min="0" max="${fee}" id="pay-disc" data-a="pay-disc" data-fee="${fee}" value=""></label>
       <label class="field" id="pay-why-wrap" ${pay === "waive" ? "" : "hidden"}>Reason<input id="pay-why"></label></div></div>`;
 }
 function readPay(fee) {
@@ -392,10 +394,10 @@ async function loadAvail() {
   b.token = b.avail.next?.token ?? null;
   renderBooking();
 }
-function slotCard(token, time, note, a) {
+function slotCard(token, time, note, a, fee) {
   return `<div class="tiles-row"><div class="tk big"><small>Token</small><b>${token}</b></div>
     ${time ? `<div class="tk"><small>${note ? "Around" : "Time"}</small><b>${time}</b></div>` : ""}
-    <div class="tk"><small>Left</small><b>${a.left}</b></div></div>`;
+    <div class="tk"><small>Left</small><b>${a.left}</b></div>${fee != null ? feeTile(fee) : ""}</div>`;
 }
 function renderBooking() {
   const b = M; if (!b) return;
@@ -404,14 +406,14 @@ function renderBooking() {
   const title = { book: "New booking", walk: "Walk-in", resched: "Reschedule" }[b.mode];
   let slot = "";
   if (!a.available) slot = `<div class="warn">${esc(a.reason || "Not available.")}</div>`;
-  else if (b.mode === "walk") slot = slotCard(a.token_timing === "booking" ? a.next.token : "—", "", "", a);
+  else if (b.mode === "walk") slot = slotCard(a.token_timing === "booking" ? a.next.token : "—", "", "", a, a.available ? a.fee : null);
   else if (a.token_timing === "booking") {
     const free = new Set(a.free_tokens.map(t => t.token)), times = Object.fromEntries(a.free_tokens.map(t => [t.token, t.time]));
     slot = `${slotCard(b.token, times[b.token], s.exact_time ? "" : "approx.", a)}<div class="chips slot-chips">${Array.from({ length: s.max_patients }, (_, i) => i + 1).filter(t => free.has(t)).map(t => `<button data-a="pick-token" data-v="${t}" aria-pressed="${t === b.token}"><b>${t}</b>${times[t]}</button>`).join("")}</div>`;
   } else slot = slotCard("—", a.expected_time, "approx.", a);
   const p = b.patient;
   const sessChips = (a.sessions || []).length > 1 ? `<div class="seg">${a.sessions.map(x => `<button data-a="bk-session" data-v="${x.key}" aria-pressed="${x.key === b.session}" ${x.ended ? "disabled" : ""}>${x.label} · ${x.start}–${x.end}</button>`).join("")}</div>` : "";
-  const extra = b.mode === "walk" && a.available ? payBlock(a.fee, b.pay) : b.mode === "resched" ? reasonChips(RESCHED_REASONS, b.reason, "bk-reason") : "";
+  const extra = b.mode === "walk" && a.available ? payBlock(a.fee, b.pay, true) : b.mode === "resched" ? reasonChips(RESCHED_REASONS, b.reason, "bk-reason") : "";
   modal(`<div class="booking-dialog"><h2>${title}</h2>
     ${p ? `<div class="pt-chip"><span class="avatar">${esc(initials(p.name))}</span><span class="pt-main"><b>${esc(p.name)}</b><span class="pt-meta"><span class="mono">${esc(p.uhid)}</span>${p.phone ? `<span>${esc(p.phone)}</span>` : ""}</span></span>${b.mode === "resched" ? "" : `<button class="btn small" data-a="bk-clear">Change</button>`}</div>`
         : `<input class="input" id="bk-q" placeholder="Search name, phone or UHID" value="${esc(b.q)}" data-a="bk-q" autocomplete="off">
