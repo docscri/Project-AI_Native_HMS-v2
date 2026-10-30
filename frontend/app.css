@@ -1042,8 +1042,9 @@ sup.cs button:hover, .cite-sup:hover { background: #3f6b1f; }
 .bchart-rows b.abn { color: #D9542F; }
 .bchart-rows small { color: var(--muted); font-weight: 600; font-size: 12px; }
 .bchart-rows small { text-align: right; }
-/* login boxes: light when empty, see-through once filled (typed or autofilled) */
-.login-input:not(:placeholder-shown), .login-input:-webkit-autofill {
-  background: color-mix(in srgb, var(--surface) 14%, transparent); border-color: var(--surface); color: var(--surface); caret-color: var(--surface);
-  -webkit-text-fill-color: var(--surface); box-shadow: 0 0 0 100px color-mix(in srgb, var(--surface) 14%, var(--frame)) inset; transition: background-color 9999s;
+/* login boxes: light when empty; once typed, a see-through tint like the browser's autofill, so the wave shows behind */
+:root { --login-filled: color-mix(in srgb, #5b7a9e 32%, transparent); }
+.login-input:not(:placeholder-shown):not(:-webkit-autofill) {
+  background: var(--login-filled); border-color: var(--surface); color: var(--surface); caret-color: var(--surface);
 }
+.login-input:-webkit-autofill { border-color: var(--surface); }
