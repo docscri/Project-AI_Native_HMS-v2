@@ -1,8 +1,9 @@
+import hashlib
 import os
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import db
@@ -38,8 +39,17 @@ def health():
 app.mount("/static", StaticFiles(directory=FRONTEND), name="static")
 
 
+def page() -> str:
+    """index.html with app.css / app.js tagged by their content, so a deploy is picked up without a hard refresh."""
+    html = (FRONTEND / "index.html").read_text()
+    for name in ("app.css", "app.js"):
+        tag = hashlib.sha1((FRONTEND / name).read_bytes()).hexdigest()[:10]
+        html = html.replace(f"/static/{name}\"", f"/static/{name}?v={tag}\"")
+    return html
+
+
 @app.get("/{path:path}", include_in_schema=False)
 def spa(path: str):
     if path.startswith("api/"):
         raise HTTPException(404, "Not found.")
-    return FileResponse(FRONTEND / "index.html")
+    return HTMLResponse(page(), headers={"Cache-Control": "no-cache"})
